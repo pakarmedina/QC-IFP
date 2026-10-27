@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/layout/app-header";
 import { StatusBadge, VerdictBadge } from "@/components/ui/badge";
-import { formatDate } from "@/lib/format";
+import { RowActions } from "@/components/inspection/row-actions";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { requirePageUser } from "@/server/auth/guard";
 import { listInspections, type ListParams } from "@/server/services/inspection-service";
 
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 type SP = Record<string, string | string[] | undefined>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+const isMonth = (s: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 
 function parseParams(sp: SP): ListParams {
   const status = first(sp.status);
@@ -18,12 +20,14 @@ function parseParams(sp: SP): ListParams {
   const sort = first(sp.sort);
   const from = first(sp.from);
   const to = first(sp.to);
+  const month = first(sp.month);
   return {
     q: first(sp.q).trim().slice(0, 60) || undefined,
     status: status === "DRAFT" || status === "FINAL" ? status : undefined,
     verdict: verdict === "PASS" || verdict === "FAIL" ? verdict : undefined,
     from: isDate(from) ? from : undefined,
     to: isDate(to) ? to : undefined,
+    month: isMonth(month) ? month : undefined,
     sort: sort === "oldest" || sort === "serial" ? sort : "newest",
     page: Math.max(1, parseInt(first(sp.page), 10) || 1),
   };
@@ -43,11 +47,12 @@ export default async function InspectionsPage({ searchParams }: { searchParams: 
     if (params.verdict) qs.set("verdict", params.verdict);
     if (params.from) qs.set("from", params.from);
     if (params.to) qs.set("to", params.to);
+    if (params.month) qs.set("month", params.month);
     if (params.sort !== "newest") qs.set("sort", params.sort);
     qs.set("page", String(p));
     return `/inspections?${qs.toString()}`;
   };
-  const filtered = Boolean(params.q || params.status || params.verdict || params.from || params.to);
+  const filtered = Boolean(params.q || params.status || params.verdict || params.from || params.to || params.month);
 
   return (
     <>
@@ -95,6 +100,10 @@ export default async function InspectionsPage({ searchParams }: { searchParams: 
             </select>
           </div>
           <div>
+            <label htmlFor="month" className="mb-1 block text-sm font-medium text-slate-700">Bulan</label>
+            <input id="month" name="month" type="month" defaultValue={params.month} className={selectClass} />
+          </div>
+          <div>
             <label htmlFor="from" className="mb-1 block text-sm font-medium text-slate-700">Dari tanggal</label>
             <input id="from" name="from" type="date" defaultValue={params.from} className={selectClass} />
           </div>
@@ -133,12 +142,23 @@ export default async function InspectionsPage({ searchParams }: { searchParams: 
                       SN {i.serialNumber} · {i.site} · {formatDate(i.inspectedAt)}
                     </span>
                     <span className="block text-sm text-slate-600">Inspektur: {i.inspector.name}</span>
+                    {i.revisionCount > 0 && i.revisedAt && (
+                      <span className="block text-sm text-amber-900">
+                        Pernah diperbarui {i.revisionCount} kali, terakhir {formatDateTime(i.revisedAt)}
+                      </span>
+                    )}
                   </span>
                   <span className="flex gap-2">
                     <StatusBadge status={i.status} />
                     {i.status === "FINAL" && <VerdictBadge verdict={i.verdict} />}
                   </span>
                 </Link>
+                <RowActions
+                  id={i.id}
+                  number={i.number}
+                  isFinal={i.status === "FINAL"}
+                  canDelete={user.role === "ADMIN" || i.status === "DRAFT"}
+                />
               </li>
             ))}
           </ul>

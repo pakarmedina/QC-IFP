@@ -1,4 +1,4 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { AppHeader } from "@/components/layout/app-header";
 import { InspectionForm, type Answers } from "@/components/inspection/inspection-form";
 import { toDateInput } from "@/lib/format";
@@ -13,7 +13,6 @@ export default async function EditInspectionPage({ params }: { params: Promise<{
   const user = await requirePageUser();
   const [inspection, checklist] = await Promise.all([findInspection(id, user), getChecklist()]);
   if (!inspection) notFound();
-  if (inspection.status === "FINAL") redirect(`/inspections/${id}`);
 
   // Semua item default "Ya", kecuali item wajib foto yang harus diisi sendiri oleh inspektur.
   const saved = new Map(inspection.results.map((r) => [r.itemId, r]));
@@ -33,6 +32,7 @@ export default async function EditInspectionPage({ params }: { params: Promise<{
         <InspectionForm
           inspectionId={inspection.id}
           number={inspection.number}
+          status={inspection.status}
           categories={checklist.map((c) => ({
             code: c.code,
             name: c.name,

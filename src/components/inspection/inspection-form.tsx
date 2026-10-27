@@ -35,12 +35,13 @@ const OPTIONS: { value: ResultValue; label: string; selected: string }[] = [
 type Props = {
   inspectionId: string;
   number: string;
+  status: "DRAFT" | "FINAL";
   categories: FormCategory[];
   initialHeader: FormHeader;
   initialAnswers: Answers;
 };
 
-export function InspectionForm({ inspectionId, number, categories, initialHeader, initialAnswers }: Props) {
+export function InspectionForm({ inspectionId, number, status, categories, initialHeader, initialAnswers }: Props) {
   const router = useRouter();
   const [header, setHeader] = useState(initialHeader);
   const [answers, setAnswers] = useState<Answers>(initialAnswers);
@@ -56,6 +57,7 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
   const [photoErrors, setPhotoErrors] = useState<Record<string, string>>({});
   const [photoBusy, setPhotoBusy] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
+  const isFinal = status === "FINAL";
   const photosRef = useRef(photos);
   photosRef.current = photos;
 
@@ -183,6 +185,38 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
     setBusy(null);
   }
 
+  /** Memperbarui inspeksi yang sudah final: data harus lengkap, hasil dihitung ulang di server. */
+  async function onUpdateFinal() {
+    setNotice(null);
+    const missing = allItems.filter((i) => !answers[i.id]?.result);
+    if (missing.length) {
+      setShowMissing(true);
+      setError(`Masih ada ${missing.length} item yang belum diisi. Item pertama: ${missing[0].code}.`);
+      document.getElementById(`item-${missing[0].code}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    const noNote = allItems.filter((i) => answers[i.id]?.result === "TIDAK" && !answers[i.id].note.trim());
+    if (noNote.length) {
+      setShowMissing(true);
+      setError(`Item bernilai Tidak wajib diberi keterangan: ${noNote.map((i) => i.code).join(", ")}.`);
+      document.getElementById(`item-${noNote[0].code}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    const noPhoto = allItems.filter((i) => i.requiresPhoto && !photos[i.id]);
+    const photoWarn = noPhoto.length
+      ? ` Foto item ${noPhoto.map((i) => i.code).join(", ")} tidak ada di browser ini (mungkin diambil dari HP lain), jadi PDF dari browser ini tidak memuatnya.`
+      : "";
+    if (!window.confirm(`Perbarui inspeksi final ini? Hasil LULUS/GAGAL dihitung ulang dan pembaruan tercatat.${photoWarn} Lanjutkan?`)) return;
+
+    setBusy("final");
+    if (await save()) {
+      router.push(`/inspections/${inspectionId}`);
+      router.refresh();
+      return;
+    }
+    setBusy(null);
+  }
+
   async function onFinalize() {
     setNotice(null);
     const missing = allItems.filter((i) => !answers[i.id]?.result);
@@ -254,6 +288,11 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
       <div className="mx-auto mt-6 max-w-3xl space-y-6">
         {error && <Alert kind="error">{error}</Alert>}
         {notice && <Alert kind="success">{notice}</Alert>}
+        {isFinal && (
+          <div role="note" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Inspeksi ini sudah final. Perubahan akan menghitung ulang hasil LULUS/GAGAL dan dicatat sebagai pembaruan.
+          </div>
+        )}
         {photoCount > 0 && (
           <div role="note" className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-800">
             Foto disimpan di browser HP ini saja, tidak di server. Setelah finalisasi, unduh PDF/Excel dari halaman detail
@@ -430,12 +469,25 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
 
       <div className="fixed inset-x-0 bottom-20 z-10 border-y border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:bottom-0 sm:border-b-0">
         <div className="mx-auto flex max-w-3xl gap-3">
-          <Button variant="secondary" className="flex-1" onClick={onSave} loading={busy === "save"} disabled={busy !== null}>
-            Simpan draft
-          </Button>
-          <Button className="flex-1" onClick={onFinalize} loading={busy === "final"} disabled={busy !== null}>
-            Finalisasi
-          </Button>
+          {isFinal ? (
+            <>
+              <Button variant="secondary" className="flex-1" onClick={() => router.push(`/inspections/${inspectionId}`)} disabled={busy !== null}>
+                Batal
+              </Button>
+              <Button className="flex-1" onClick={onUpdateFinal} loading={busy === "final"} disabled={busy !== null}>
+                Simpan pembaruan
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" className="flex-1" onClick={onSave} loading={busy === "save"} disabled={busy !== null}>
+                Simpan draft
+              </Button>
+              <Button className="flex-1" onClick={onFinalize} loading={busy === "final"} disabled={busy !== null}>
+                Finalisasi
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>

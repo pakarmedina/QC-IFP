@@ -2,6 +2,8 @@ import { Prisma } from "@prisma/client";
 import { db } from "../db";
 import { HttpError } from "../http";
 import type { CurrentUser } from "../auth/session";
+import { formatDate } from "@/lib/format";
+import type { ReportData } from "@/lib/export/report";
 import type { CreateInspectionInput, SaveInspectionInput } from "@/lib/validators/inspection";
 
 export const PAGE_SIZE = 10;
@@ -123,14 +125,19 @@ export function getChecklist() {
   });
 }
 
-/** Menyimpan draft; mengembalikan inspeksi lain yang memakai nomor seri sama (hanya peringatan). */
-export async function saveDraft(id: string, user: CurrentUser, input: SaveInspectionInput) {
+/**
+ * Menyimpan inspeksi. Draft disimpan apa adanya. Inspeksi FINAL boleh diperbarui oleh pemiliknya
+ * (Tim QC) atau Admin: datanya harus lengkap seperti saat finalisasi, hasil LULUS/GAGAL dihitung ulang,
+ * pembaruan dihitung dan dicatat di log audit.
+ * Mengembalikan inspeksi lain yang memakai nomor seri sama (hanya peringatan).
+ */
+export async function saveInspection(id: string, user: CurrentUser, input: SaveInspectionInput) {
   const inspection = await db.inspection.findFirst({
     where: { id, ...ownScope(user) },
-    select: { id: true, status: true },
+    select: { id: true, number: true, status: true, verdict: true },
   });
   if (!inspection) throw new HttpError(404, "Inspeksi tidak ditemukan.");
-  if (inspection.status !== "DRAFT") throw new HttpError(409, "Inspeksi sudah final dan tidak bisa diubah.");
+  const isFinal = inspection.status === "FINAL";
 
   const ids = input.results.map((r) => r.itemId);
   const [items, existing] = await Promise.all([
@@ -144,9 +151,29 @@ export async function saveDraft(id: string, user: CurrentUser, input: SaveInspec
   if (byId.size !== ids.length) throw new HttpError(400, "Ada item checklist yang tidak dikenal.");
   const photos = new Map(existing.map((e) => [e.itemId, e.photoUrl]));
 
-  // Sedikit query sengaja: hapus semua hasil lalu isi ulang sekaligus (foto lama dibawa kembali).
+  let verdict: "PASS" | "FAIL" | null = null;
+  if (isFinal) {
+    const active = await db.checklistItem.findMany({
+      where: { isActive: true },
+      select: { id: true, code: true },
+      orderBy: [{ category: { sortOrder: "asc" } }, { sortOrder: "asc" }],
+    });
+    const answered = new Set(ids);
+    const missing = active.filter((i) => !answered.has(i.id)).map((i) => i.code);
+    if (missing.length) {
+      throw new HttpError(422, `Masih ada ${missing.length} item yang belum diisi: ${codeList(missing)}.`);
+    }
+    const noNote = input.results.filter((r) => r.result === "TIDAK" && !r.note?.trim()).map((r) => byId.get(r.itemId)!.code);
+    if (noNote.length) {
+      throw new HttpError(422, `Item bernilai Tidak wajib diberi keterangan: ${codeList(noNote)}.`);
+    }
+    verdict = input.results.some((r) => r.result === "TIDAK") ? "FAIL" : "PASS";
+  }
+
+  // Sedikit query sengaja: hapus hasil lalu isi ulang sekaligus (foto lama dibawa kembali).
   // Fungsi server Netlify punya batas 10 detik, jadi 58 upsert terpisah terlalu berisiko.
-  await db.$transaction([
+  // Inspeksi final: hasil untuk item yang sudah dinonaktifkan di checklist tetap disimpan.
+  const ops: Prisma.PrismaPromise<unknown>[] = [
     db.inspection.update({
       where: { id },
       data: {
@@ -156,9 +183,12 @@ export async function saveDraft(id: string, user: CurrentUser, input: SaveInspec
         physicalNote: input.physicalNote,
         boxNote: input.boxNote,
         approvedBy: input.approvedBy,
+        ...(isFinal ? { verdict, revisionCount: { increment: 1 }, revisedAt: new Date() } : {}),
       },
     }),
-    db.inspectionResult.deleteMany({ where: { inspectionId: id } }),
+    db.inspectionResult.deleteMany({
+      where: isFinal ? { inspectionId: id, itemId: { in: ids } } : { inspectionId: id },
+    }),
     db.inspectionResult.createMany({
       data: input.results.map((r) => {
         const item = byId.get(r.itemId)!;
@@ -176,7 +206,29 @@ export async function saveDraft(id: string, user: CurrentUser, input: SaveInspec
         };
       }),
     }),
-  ]);
+  ];
+  if (isFinal) {
+    ops.push(audit(user.id, "inspection.update", id));
+    // Hasil berubah menjadi GAGAL: beri tahu Admin lain, sama seperti saat finalisasi.
+    if (verdict === "FAIL" && inspection.verdict !== "FAIL") {
+      const admins = await db.user.findMany({
+        where: { role: "ADMIN", status: "ACTIVE", NOT: { id: user.id } },
+        select: { id: true },
+      });
+      if (admins.length) {
+        ops.push(
+          db.notification.createMany({
+            data: admins.map((a) => ({
+              userId: a.id,
+              title: "Inspeksi diperbarui menjadi GAGAL",
+              body: `${inspection.number} (SN ${input.serialNumber}) kini memiliki item bernilai Tidak.`,
+            })),
+          }),
+        );
+      }
+    }
+  }
+  await db.$transaction(ops);
   return findDuplicateSerials(user, input.serialNumber, id);
 }
 
@@ -254,6 +306,7 @@ export type ListParams = {
   verdict?: "PASS" | "FAIL";
   from?: string;
   to?: string;
+  month?: string; // YYYY-MM
   sort: "newest" | "oldest" | "serial";
   page: number;
 };
@@ -273,6 +326,11 @@ export async function listInspections(user: CurrentUser, p: ListParams) {
   if (p.verdict) and.push({ verdict: p.verdict });
   if (p.from) and.push({ inspectedAt: { gte: toDbDate(p.from) } });
   if (p.to) and.push({ inspectedAt: { lte: toDbDate(p.to) } });
+  if (p.month) {
+    const [y, m] = p.month.split("-").map(Number);
+    const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+    and.push({ inspectedAt: { gte: toDbDate(`${p.month}-01`), lt: toDbDate(next) } });
+  }
   const where: Prisma.InspectionWhereInput = { AND: and };
 
   const orderBy: Prisma.InspectionOrderByWithRelationInput[] =
@@ -317,4 +375,32 @@ export async function getDashboardStats(user: CurrentUser) {
     }),
   ]);
   return { total, drafts, pass, fail, recent, topFails };
+}
+
+/** Data laporan (PDF/Excel) dari satu inspeksi; dipakai halaman detail dan daftar riwayat. */
+export function toReportData(inspection: DetailInspection): ReportData {
+  return {
+    number: inspection.number,
+    serialNumber: inspection.serialNumber,
+    model: inspection.model,
+    site: inspection.site,
+    inspectedAt: formatDate(inspection.inspectedAt),
+    inspector: inspection.inspector.name,
+    approvedBy: inspection.approvedBy,
+    physicalNote: inspection.physicalNote,
+    boxNote: inspection.boxNote,
+    verdict: inspection.verdict,
+    categories: groupResults(inspection.results).map((g) => ({
+      name: g.name,
+      items: g.results.map((r) => ({
+        itemId: r.itemId,
+        code: r.itemCode,
+        label: r.itemLabel,
+        standard: r.standard,
+        result: r.result,
+        note: r.note,
+        requiresPhoto: r.requiresPhoto,
+      })),
+    })),
+  };
 }

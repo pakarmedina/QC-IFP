@@ -3,11 +3,10 @@ import { notFound } from "next/navigation";
 import { AppHeader } from "@/components/layout/app-header";
 import { DeleteInspectionButton } from "@/components/inspection/delete-inspection-button";
 import { ExportButtons } from "@/components/inspection/export-buttons";
-import type { ReportData } from "@/lib/export/report";
 import { Badge, StatusBadge, VerdictBadge } from "@/components/ui/badge";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { requirePageUser } from "@/server/auth/guard";
-import { findInspection, groupResults } from "@/server/services/inspection-service";
+import { findInspection, groupResults, toReportData } from "@/server/services/inspection-service";
 
 export const metadata = { title: "Detail inspeksi" };
 export const dynamic = "force-dynamic";
@@ -22,32 +21,9 @@ export default async function InspectionDetailPage({ params }: { params: Promise
   if (!inspection) notFound();
 
   const groups = groupResults(inspection.results);
-  const canEdit = inspection.status === "DRAFT";
+  const isFinal = inspection.status === "FINAL";
   const canDelete = user.role === "ADMIN" || inspection.status === "DRAFT";
-  const report: ReportData = {
-    number: inspection.number,
-    serialNumber: inspection.serialNumber,
-    model: inspection.model,
-    site: inspection.site,
-    inspectedAt: formatDate(inspection.inspectedAt),
-    inspector: inspection.inspector.name,
-    approvedBy: inspection.approvedBy,
-    physicalNote: inspection.physicalNote,
-    boxNote: inspection.boxNote,
-    verdict: inspection.verdict,
-    categories: groups.map((g) => ({
-      name: g.name,
-      items: g.results.map((r) => ({
-        itemId: r.itemId,
-        code: r.itemCode,
-        label: r.itemLabel,
-        standard: r.standard,
-        result: r.result,
-        note: r.note,
-        requiresPhoto: r.requiresPhoto,
-      })),
-    })),
-  };
+  const report = toReportData(inspection);
   const info: [string, string][] = [
     ["Nomor seri", inspection.serialNumber],
     ["Model", inspection.model],
@@ -73,14 +49,19 @@ export default async function InspectionDetailPage({ params }: { params: Promise
               <StatusBadge status={inspection.status} />
               {inspection.status === "FINAL" && <VerdictBadge verdict={inspection.verdict} />}
             </div>
+            {inspection.revisionCount > 0 && inspection.revisedAt && (
+              <p className="mt-2 text-sm text-slate-600">
+                Pernah diperbarui {inspection.revisionCount} kali, terakhir {formatDateTime(inspection.revisedAt)}.
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
-            {canEdit && (
+            {(
               <Link
                 href={`/inspections/${inspection.id}/edit`}
                 className="inline-flex min-h-11 items-center rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white hover:bg-brand-700"
               >
-                Lanjutkan mengisi
+                {isFinal ? "Perbarui" : "Lanjutkan mengisi"}
               </Link>
             )}
             {canDelete && <DeleteInspectionButton id={inspection.id} number={inspection.number} />}

@@ -107,6 +107,8 @@ model Inspection {
   physicalNote String? // Catatan Fisik
   boxNote      String? // Catatan Dus
   approvedBy   String? // Supervisor / QA
+  revisionCount Int            @default(0) // berapa kali inspeksi final diperbarui
+  revisedAt     DateTime? // waktu pembaruan terakhir inspeksi final
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 

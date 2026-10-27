@@ -12,3 +12,14 @@ export function toDateInput(d: Date | string) {
 export function todayInput() {
   return toDateInput(new Date());
 }
+
+export function formatDateTime(d: Date | string) {
+  return new Date(d).toLocaleString("id-ID", {
+    timeZone: TZ,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
