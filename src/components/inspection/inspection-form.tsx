@@ -62,7 +62,7 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
   }
 
   function setAnswer(itemId: string, patch: Partial<Answers[string]>) {
-    setAnswers((a) => ({ ...a, [itemId]: { result: null, note: "", ...a[itemId], ...patch } }));
+    setAnswers((a) => ({ ...a, [itemId]: { ...(a[itemId] ?? { result: null, note: "" }), ...patch } }));
     setDirty(true);
   }
 
