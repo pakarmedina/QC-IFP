@@ -10,8 +10,8 @@ export function PUT(req: Request, { params }: Ctx) {
     const { id } = await params;
     const user = await requireApiUser();
     const input = saveInspectionSchema.parse(await readJson(req));
-    await saveDraft(id, user, input);
-    return json({ ok: true });
+    const duplicates = await saveDraft(id, user, input);
+    return json({ ok: true, duplicates });
   });
 }
 

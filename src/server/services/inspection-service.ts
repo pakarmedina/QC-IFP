@@ -34,7 +34,28 @@ async function nextNumber(ymd: string) {
   return `${prefix}${String(seq).padStart(4, "0")}`;
 }
 
+/** Inspeksi lain dengan nomor seri yang sama (tanpa membedakan huruf besar/kecil). */
+export async function findDuplicateSerials(user: CurrentUser, serialNumber: string, excludeId?: string) {
+  const rows = await db.inspection.findMany({
+    where: {
+      serialNumber: { equals: serialNumber, mode: "insensitive" },
+      ...(excludeId ? { NOT: { id: excludeId } } : {}),
+    },
+    orderBy: { inspectedAt: "desc" },
+    take: 5,
+    select: { id: true, number: true, inspectedAt: true, status: true, verdict: true, inspectorId: true },
+  });
+  // Tim QC hanya boleh membuka inspeksi miliknya; yang lain cukup diberi tahu bahwa ada.
+  return rows.map(({ inspectorId, ...r }) => ({ ...r, mine: user.role === "ADMIN" || inspectorId === user.id }));
+}
+
 export async function createInspection(user: CurrentUser, input: CreateInspectionInput) {
+  if (!input.confirmDuplicate) {
+    const duplicates = await findDuplicateSerials(user, input.serialNumber);
+    if (duplicates.length) {
+      throw new HttpError(409, "Nomor seri ini sudah pernah diinspeksi.", { duplicates });
+    }
+  }
   const ymd = input.inspectedAt.replace(/-/g, "");
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
@@ -102,6 +123,7 @@ export function getChecklist() {
   });
 }
 
+/** Menyimpan draft; mengembalikan inspeksi lain yang memakai nomor seri sama (hanya peringatan). */
 export async function saveDraft(id: string, user: CurrentUser, input: SaveInspectionInput) {
   const inspection = await db.inspection.findFirst({
     where: { id, ...ownScope(user) },
@@ -155,6 +177,7 @@ export async function saveDraft(id: string, user: CurrentUser, input: SaveInspec
       }),
     }),
   ]);
+  return findDuplicateSerials(user, input.serialNumber, id);
 }
 
 function codeList(codes: string[]) {

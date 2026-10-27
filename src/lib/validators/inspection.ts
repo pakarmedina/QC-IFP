@@ -13,13 +13,23 @@ const optionalText = (max: number) =>
     .optional()
     .transform((v) => (v ? v : null));
 
-export const createInspectionSchema = z.object({
-  serialNumber: z.string().trim().min(3, "Nomor seri minimal 3 karakter").max(60, "Nomor seri terlalu panjang"),
+const baseInspectionSchema = z.object({
+  // Huruf besar dan spasi rapi, supaya "abc 123" dan "ABC123 " dikenali sebagai nomor seri yang sama.
+  serialNumber: z
+    .string()
+    .trim()
+    .min(3, "Nomor seri minimal 3 karakter")
+    .max(60, "Nomor seri terlalu panjang")
+    .transform((s) => s.replace(/\s+/g, " ").toUpperCase()),
   site: z.string().trim().min(2, "Lokasi wajib diisi").max(80, "Lokasi terlalu panjang"),
   inspectedAt: dateString,
 });
 
-export const saveInspectionSchema = createInspectionSchema
+export const createInspectionSchema = baseInspectionSchema.extend({
+  confirmDuplicate: z.boolean().optional(),
+});
+
+export const saveInspectionSchema = baseInspectionSchema
   .extend({
     physicalNote: optionalText(500),
     boxNote: optionalText(500),

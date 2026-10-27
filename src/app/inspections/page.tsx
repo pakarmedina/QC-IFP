@@ -29,7 +29,7 @@ function parseParams(sp: SP): ListParams {
   };
 }
 
-const selectClass = "block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base";
+const selectClass = "block min-h-11 w-full min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 text-base";
 
 export default async function InspectionsPage({ searchParams }: { searchParams: Promise<SP> }) {
   const user = await requirePageUser();
@@ -63,8 +63,8 @@ export default async function InspectionsPage({ searchParams }: { searchParams: 
           </Link>
         </div>
 
-        <form method="get" className="mt-6 grid gap-3 rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="sm:col-span-2 lg:col-span-3">
+        <form method="get" className="mt-6 grid grid-cols-2 gap-3 rounded-xl bg-white p-4 ring-1 ring-slate-200 lg:grid-cols-3 [&>div]:min-w-0">
+          <div className="col-span-2 lg:col-span-3">
             <label htmlFor="q" className="mb-1 block text-sm font-medium text-slate-700">
               Cari nomor seri, nomor laporan, atau inspektur
             </label>

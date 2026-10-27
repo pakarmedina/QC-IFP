@@ -5,6 +5,7 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    public extra?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -33,7 +34,7 @@ export async function handle(req: Request, fn: () => Promise<Response>) {
     assertSameOrigin(req);
     return await fn();
   } catch (e) {
-    if (e instanceof HttpError) return json({ error: e.message }, e.status);
+    if (e instanceof HttpError) return json({ error: e.message, ...e.extra }, e.status);
     if (e instanceof ZodError) {
       return json({ error: "Input tidak valid.", fields: e.flatten().fieldErrors }, 400);
     }

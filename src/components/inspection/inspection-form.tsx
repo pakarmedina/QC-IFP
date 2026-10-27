@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { DuplicateList, type DuplicateInspection } from "./duplicate-list";
 
 type ResultValue = "YA" | "TIDAK" | "NA";
 export type FormItem = { id: string; code: string; label: string; standard: string | null; requiresPhoto: boolean };
@@ -45,6 +46,7 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
   const [notice, setNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [showMissing, setShowMissing] = useState(false);
+  const [duplicates, setDuplicates] = useState<DuplicateInspection[]>([]);
   const [view, setView] = useState<"all" | "photo">("all");
 
   const allItems = useMemo(() => categories.flatMap((c) => c.items), [categories]);
@@ -89,6 +91,7 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
         return false;
       }
       setDirty(false);
+      setDuplicates(Array.isArray(data.duplicates) ? data.duplicates : []);
       return true;
     } catch {
       setError("Tidak dapat terhubung ke server. Perubahan Anda belum tersimpan.");
@@ -164,6 +167,12 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
       <div className="mx-auto mt-6 max-w-3xl space-y-6">
         {error && <Alert kind="error">{error}</Alert>}
         {notice && <Alert kind="success">{notice}</Alert>}
+        {duplicates.length > 0 && (
+          <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-amber-900">
+            <p className="text-sm font-semibold">Nomor seri ini juga tercatat di inspeksi lain:</p>
+            <DuplicateList items={duplicates} />
+          </div>
+        )}
 
         <section aria-labelledby="hdr" className="rounded-xl bg-white p-4 ring-1 ring-slate-200 sm:p-6">
           <h2 id="hdr" className="text-lg font-bold">
