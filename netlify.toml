@@ -1,0 +1,7 @@
+# Netlify mendeteksi Next.js otomatis dan memasang adapter-nya; tidak perlu plugin manual.
+# Build: buat tabel -> isi 58 item + akun Admin (idempoten) -> build Next.js.
+[build]
+  command = "npx prisma db push && npx prisma db seed && npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
