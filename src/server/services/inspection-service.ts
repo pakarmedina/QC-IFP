@@ -1,0 +1,296 @@
+import { Prisma } from "@prisma/client";
+import { db } from "../db";
+import { HttpError } from "../http";
+import type { CurrentUser } from "../auth/session";
+import type { CreateInspectionInput, SaveInspectionInput } from "@/lib/validators/inspection";
+
+export const PAGE_SIZE = 10;
+
+/** Item bernilai "Tidak" wajib punya keterangan sebelum inspeksi difinalkan. */
+const NOTE_REQUIRED_FOR_TIDAK = true;
+
+/** Tanggal YYYY-MM-DD dari form dianggap tanggal WIB. */
+function toDbDate(s: string) {
+  return new Date(`${s}T00:00:00+07:00`);
+}
+
+/** Admin melihat semua inspeksi; Tim QC hanya miliknya. */
+function ownScope(user: CurrentUser): Prisma.InspectionWhereInput {
+  return user.role === "ADMIN" ? {} : { inspectorId: user.id };
+}
+
+function audit(userId: string, action: string, entityId: string) {
+  return db.auditLog.create({ data: { userId, action, entity: "Inspection", entityId } });
+}
+
+async function nextNumber(ymd: string) {
+  const prefix = `QC-${ymd}-`;
+  const last = await db.inspection.findFirst({
+    where: { number: { startsWith: prefix } },
+    orderBy: { number: "desc" },
+    select: { number: true },
+  });
+  const seq = last ? parseInt(last.number.slice(prefix.length), 10) + 1 : 1;
+  return `${prefix}${String(seq).padStart(4, "0")}`;
+}
+
+export async function createInspection(user: CurrentUser, input: CreateInspectionInput) {
+  const ymd = input.inspectedAt.replace(/-/g, "");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const inspection = await db.inspection.create({
+        data: {
+          number: await nextNumber(ymd),
+          serialNumber: input.serialNumber,
+          site: input.site,
+          inspectedAt: toDbDate(input.inspectedAt),
+          inspectorId: user.id,
+        },
+        select: { id: true },
+      });
+      await audit(user.id, "inspection.create", inspection.id);
+      return inspection.id;
+    } catch (e) {
+      // Dua orang membuat nomor yang sama pada saat bersamaan: coba lagi dengan nomor berikutnya.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") continue;
+      throw e;
+    }
+  }
+  throw new HttpError(409, "Gagal membuat nomor inspeksi. Coba lagi.");
+}
+
+const detailInclude = {
+  inspector: { select: { id: true, name: true, username: true } },
+  results: {
+    include: { item: { select: { sortOrder: true, category: { select: { sortOrder: true } } } } },
+  },
+} satisfies Prisma.InspectionInclude;
+
+export async function findInspection(id: string, user: CurrentUser) {
+  return db.inspection.findFirst({ where: { id, ...ownScope(user) }, include: detailInclude });
+}
+
+export async function getInspection(id: string, user: CurrentUser) {
+  const inspection = await findInspection(id, user);
+  if (!inspection) throw new HttpError(404, "Inspeksi tidak ditemukan.");
+  return inspection;
+}
+
+type DetailInspection = NonNullable<Awaited<ReturnType<typeof findInspection>>>;
+
+/** Hasil per kategori, urut sesuai template checklist. */
+export function groupResults(results: DetailInspection["results"]) {
+  const sorted = [...results].sort(
+    (a, b) => a.item.category.sortOrder - b.item.category.sortOrder || a.item.sortOrder - b.item.sortOrder,
+  );
+  const groups: { name: string; results: typeof sorted }[] = [];
+  for (const r of sorted) {
+    let g = groups.find((x) => x.name === r.categoryName);
+    if (!g) {
+      g = { name: r.categoryName, results: [] };
+      groups.push(g);
+    }
+    g.results.push(r);
+  }
+  return groups;
+}
+
+export function getChecklist() {
+  return db.checklistCategory.findMany({
+    orderBy: { sortOrder: "asc" },
+    include: { items: { where: { isActive: true }, orderBy: { sortOrder: "asc" } } },
+  });
+}
+
+export async function saveDraft(id: string, user: CurrentUser, input: SaveInspectionInput) {
+  const inspection = await db.inspection.findFirst({
+    where: { id, ...ownScope(user) },
+    select: { id: true, status: true },
+  });
+  if (!inspection) throw new HttpError(404, "Inspeksi tidak ditemukan.");
+  if (inspection.status !== "DRAFT") throw new HttpError(409, "Inspeksi sudah final dan tidak bisa diubah.");
+
+  const ids = input.results.map((r) => r.itemId);
+  const [items, existing] = await Promise.all([
+    db.checklistItem.findMany({
+      where: { id: { in: ids }, isActive: true },
+      include: { category: { select: { name: true } } },
+    }),
+    db.inspectionResult.findMany({ where: { inspectionId: id }, select: { itemId: true, photoUrl: true } }),
+  ]);
+  const byId = new Map(items.map((i) => [i.id, i]));
+  if (byId.size !== ids.length) throw new HttpError(400, "Ada item checklist yang tidak dikenal.");
+  const photos = new Map(existing.map((e) => [e.itemId, e.photoUrl]));
+
+  // Sedikit query sengaja: hapus semua hasil lalu isi ulang sekaligus (foto lama dibawa kembali).
+  // Fungsi server Netlify punya batas 10 detik, jadi 58 upsert terpisah terlalu berisiko.
+  await db.$transaction([
+    db.inspection.update({
+      where: { id },
+      data: {
+        serialNumber: input.serialNumber,
+        site: input.site,
+        inspectedAt: toDbDate(input.inspectedAt),
+        physicalNote: input.physicalNote,
+        boxNote: input.boxNote,
+        approvedBy: input.approvedBy,
+      },
+    }),
+    db.inspectionResult.deleteMany({ where: { inspectionId: id } }),
+    db.inspectionResult.createMany({
+      data: input.results.map((r) => {
+        const item = byId.get(r.itemId)!;
+        return {
+          inspectionId: id,
+          itemId: item.id,
+          itemCode: item.code,
+          categoryName: item.category.name,
+          itemLabel: item.label,
+          standard: item.standard,
+          result: r.result,
+          note: r.note,
+          photoUrl: photos.get(r.itemId) ?? null,
+        };
+      }),
+    }),
+  ]);
+}
+
+function codeList(codes: string[]) {
+  return codes.length > 10 ? `${codes.slice(0, 10).join(", ")}, ...` : codes.join(", ");
+}
+
+/** Memvalidasi data yang SUDAH tersimpan, lalu mengunci inspeksi dan menentukan LULUS/GAGAL. */
+export async function finalizeInspection(id: string, user: CurrentUser) {
+  const inspection = await db.inspection.findFirst({
+    where: { id, ...ownScope(user) },
+    include: { results: true },
+  });
+  if (!inspection) throw new HttpError(404, "Inspeksi tidak ditemukan.");
+  if (inspection.status !== "DRAFT") throw new HttpError(409, "Inspeksi ini sudah final.");
+
+  const active = await db.checklistItem.findMany({
+    where: { isActive: true },
+    select: { id: true, code: true },
+    orderBy: [{ category: { sortOrder: "asc" } }, { sortOrder: "asc" }],
+  });
+  const answered = new Set(inspection.results.map((r) => r.itemId));
+  const missing = active.filter((i) => !answered.has(i.id)).map((i) => i.code);
+  if (missing.length) {
+    throw new HttpError(422, `Masih ada ${missing.length} item yang belum diisi: ${codeList(missing)}.`);
+  }
+  if (NOTE_REQUIRED_FOR_TIDAK) {
+    const noNote = inspection.results.filter((r) => r.result === "TIDAK" && !r.note?.trim()).map((r) => r.itemCode);
+    if (noNote.length) {
+      throw new HttpError(422, `Item bernilai Tidak wajib diberi keterangan: ${codeList(noNote)}.`);
+    }
+  }
+
+  const verdict = inspection.results.some((r) => r.result === "TIDAK") ? "FAIL" : "PASS";
+  const ops: Prisma.PrismaPromise<unknown>[] = [
+    db.inspection.update({ where: { id }, data: { status: "FINAL", verdict } }),
+    audit(user.id, "inspection.finalize", id),
+  ];
+  if (verdict === "FAIL") {
+    const admins = await db.user.findMany({
+      where: { role: "ADMIN", status: "ACTIVE", NOT: { id: user.id } },
+      select: { id: true },
+    });
+    if (admins.length) {
+      ops.push(
+        db.notification.createMany({
+          data: admins.map((a) => ({
+            userId: a.id,
+            title: "Inspeksi dinyatakan GAGAL",
+            body: `${inspection.number} (SN ${inspection.serialNumber}) memiliki item bernilai Tidak.`,
+          })),
+        }),
+      );
+    }
+  }
+  await db.$transaction(ops);
+  return verdict;
+}
+
+export async function deleteInspection(id: string, user: CurrentUser) {
+  const inspection = await db.inspection.findFirst({
+    where: { id, ...ownScope(user) },
+    select: { id: true, status: true },
+  });
+  if (!inspection) throw new HttpError(404, "Inspeksi tidak ditemukan.");
+  if (user.role !== "ADMIN" && inspection.status !== "DRAFT") {
+    throw new HttpError(403, "Hanya Admin yang dapat menghapus inspeksi final.");
+  }
+  await db.$transaction([db.inspection.delete({ where: { id } }), audit(user.id, "inspection.delete", id)]);
+}
+
+export type ListParams = {
+  q?: string;
+  status?: "DRAFT" | "FINAL";
+  verdict?: "PASS" | "FAIL";
+  from?: string;
+  to?: string;
+  sort: "newest" | "oldest" | "serial";
+  page: number;
+};
+
+export async function listInspections(user: CurrentUser, p: ListParams) {
+  const and: Prisma.InspectionWhereInput[] = [ownScope(user)];
+  if (p.q) {
+    and.push({
+      OR: [
+        { serialNumber: { contains: p.q, mode: "insensitive" } },
+        { number: { contains: p.q, mode: "insensitive" } },
+        { inspector: { name: { contains: p.q, mode: "insensitive" } } },
+      ],
+    });
+  }
+  if (p.status) and.push({ status: p.status });
+  if (p.verdict) and.push({ verdict: p.verdict });
+  if (p.from) and.push({ inspectedAt: { gte: toDbDate(p.from) } });
+  if (p.to) and.push({ inspectedAt: { lte: toDbDate(p.to) } });
+  const where: Prisma.InspectionWhereInput = { AND: and };
+
+  const orderBy: Prisma.InspectionOrderByWithRelationInput[] =
+    p.sort === "oldest"
+      ? [{ inspectedAt: "asc" }, { createdAt: "asc" }]
+      : p.sort === "serial"
+        ? [{ serialNumber: "asc" }]
+        : [{ inspectedAt: "desc" }, { createdAt: "desc" }];
+
+  const total = await db.inspection.count({ where });
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const page = Math.min(Math.max(1, p.page), pages);
+  const items = await db.inspection.findMany({
+    where,
+    orderBy,
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
+    include: { inspector: { select: { name: true } } },
+  });
+  return { items, total, page, pages };
+}
+
+export async function getDashboardStats(user: CurrentUser) {
+  const scope = ownScope(user);
+  const [total, drafts, pass, fail, recent, topFails] = await Promise.all([
+    db.inspection.count({ where: scope }),
+    db.inspection.count({ where: { ...scope, status: "DRAFT" } }),
+    db.inspection.count({ where: { ...scope, status: "FINAL", verdict: "PASS" } }),
+    db.inspection.count({ where: { ...scope, status: "FINAL", verdict: "FAIL" } }),
+    db.inspection.findMany({
+      where: scope,
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      include: { inspector: { select: { name: true } } },
+    }),
+    db.inspectionResult.groupBy({
+      by: ["itemCode", "itemLabel"],
+      where: { result: "TIDAK", inspection: { ...scope, status: "FINAL" } },
+      _count: { _all: true },
+      orderBy: { _count: { itemCode: "desc" } },
+      take: 5,
+    }),
+  ]);
+  return { total, drafts, pass, fail, recent, topFails };
+}
