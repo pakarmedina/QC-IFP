@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  QC
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+}
+
+enum InspectionStatus {
+  DRAFT
+  FINAL
+}
+
+enum Verdict {
+  PASS
+  FAIL
+}
+
+enum ItemResult {
+  YA
+  TIDAK
+  NA
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  username     String     @unique
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(QC)
+  status       UserStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+
+  sessions      Session[]
+  resetTokens   PasswordResetToken[]
+  inspections   Inspection[]         @relation("Inspector")
+  notifications Notification[]
+  auditLogs     AuditLog[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  expiresAt DateTime
+  userAgent String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ChecklistCategory {
+  id        String          @id @default(cuid())
+  code      String          @unique // A..D
+  name      String
+  sortOrder Int
+  items     ChecklistItem[]
+}
+
+model ChecklistItem {
+  id         String            @id @default(cuid())
+  categoryId String
+  code       String            @unique // A1..D31
+  label      String
+  standard   String? // nilai acuan, mis. "16GB"
+  sortOrder  Int
+  isActive   Boolean           @default(true)
+  category   ChecklistCategory @relation(fields: [categoryId], references: [id])
+  results    InspectionResult[]
+}
+
+model Inspection {
+  id           String           @id @default(cuid())
+  number       String           @unique // QC-20261024-0059
+  serialNumber String
+  model        String           @default("75WM61FE")
+  site         String // Lokasi / Site
+  inspectedAt  DateTime
+  inspectorId  String
+  status       InspectionStatus @default(DRAFT)
+  verdict      Verdict?
+  physicalNote String? // Catatan Fisik
+  boxNote      String? // Catatan Dus
+  approvedBy   String? // Supervisor / QA
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  inspector User               @relation("Inspector", fields: [inspectorId], references: [id])
+  results   InspectionResult[]
+
+  @@index([serialNumber])
+  @@index([inspectedAt])
+  @@index([status])
+}
+
+// Teks item disalin agar laporan lama tidak berubah saat template diedit.
+model InspectionResult {
+  id           String     @id @default(cuid())
+  inspectionId String
+  itemId       String
+  itemCode     String
+  categoryName String
+  itemLabel    String
+  standard     String?
+  result       ItemResult
+  note         String? // Keterangan
+  photoUrl     String? // URL Foto per item
+
+  inspection Inspection     @relation(fields: [inspectionId], references: [id], onDelete: Cascade)
+  item       ChecklistItem  @relation(fields: [itemId], references: [id])
+
+  @@unique([inspectionId, itemId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
