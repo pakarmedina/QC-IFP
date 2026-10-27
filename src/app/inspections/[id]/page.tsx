@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppHeader } from "@/components/layout/app-header";
 import { DeleteInspectionButton } from "@/components/inspection/delete-inspection-button";
+import { ExportButtons } from "@/components/inspection/export-buttons";
+import type { ReportData } from "@/lib/export/report";
 import { Badge, StatusBadge, VerdictBadge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/format";
 import { requirePageUser } from "@/server/auth/guard";
@@ -22,6 +24,30 @@ export default async function InspectionDetailPage({ params }: { params: Promise
   const groups = groupResults(inspection.results);
   const canEdit = inspection.status === "DRAFT";
   const canDelete = user.role === "ADMIN" || inspection.status === "DRAFT";
+  const report: ReportData = {
+    number: inspection.number,
+    serialNumber: inspection.serialNumber,
+    model: inspection.model,
+    site: inspection.site,
+    inspectedAt: formatDate(inspection.inspectedAt),
+    inspector: inspection.inspector.name,
+    approvedBy: inspection.approvedBy,
+    physicalNote: inspection.physicalNote,
+    boxNote: inspection.boxNote,
+    verdict: inspection.verdict,
+    categories: groups.map((g) => ({
+      name: g.name,
+      items: g.results.map((r) => ({
+        itemId: r.itemId,
+        code: r.itemCode,
+        label: r.itemLabel,
+        standard: r.standard,
+        result: r.result,
+        note: r.note,
+        requiresPhoto: r.requiresPhoto,
+      })),
+    })),
+  };
   const info: [string, string][] = [
     ["Nomor seri", inspection.serialNumber],
     ["Model", inspection.model],
@@ -69,6 +95,8 @@ export default async function InspectionDetailPage({ params }: { params: Promise
             </div>
           ))}
         </dl>
+
+        {inspection.status === "FINAL" && <ExportButtons inspectionId={inspection.id} report={report} />}
 
         {groups.length === 0 ? (
           <p className="mt-6 rounded-lg border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600">

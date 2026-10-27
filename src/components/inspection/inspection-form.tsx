@@ -1,13 +1,16 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { compressImage } from "@/lib/photos/compress";
+import { deletePhoto, listPhotos, putPhoto, requestPersistentStorage } from "@/lib/photos/photo-store";
 import { DuplicateList, type DuplicateInspection } from "./duplicate-list";
+import { PhotoField, type PhotoView } from "./photo-field";
 
 type ResultValue = "YA" | "TIDAK" | "NA";
 export type FormItem = { id: string; code: string; label: string; standard: string | null; requiresPhoto: boolean };
@@ -48,11 +51,42 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
   const [showMissing, setShowMissing] = useState(false);
   const [duplicates, setDuplicates] = useState<DuplicateInspection[]>([]);
   const [view, setView] = useState<"all" | "photo">("all");
+  const [photos, setPhotos] = useState<Record<string, PhotoView>>({});
+  const [photoErrors, setPhotoErrors] = useState<Record<string, string>>({});
+  const [photoBusy, setPhotoBusy] = useState<string | null>(null);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
 
   const allItems = useMemo(() => categories.flatMap((c) => c.items), [categories]);
   const answeredCount = allItems.filter((i) => answers[i.id]?.result).length;
   const percent = allItems.length ? Math.round((answeredCount / allItems.length) * 100) : 0;
   const photoCount = allItems.filter((i) => i.requiresPhoto).length;
+
+  // Muat foto yang sudah tersimpan di browser ini.
+  useEffect(() => {
+    let cancelled = false;
+    listPhotos(inspectionId)
+      .then((list) => {
+        if (cancelled) return;
+        const loaded: Record<string, PhotoView> = {};
+        for (const p of list) loaded[p.itemId] = { url: URL.createObjectURL(p.blob), size: p.blob.size };
+        setPhotos(loaded);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setStorageError(e instanceof Error ? e.message : "Penyimpanan foto tidak tersedia.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [inspectionId]);
+
+  useEffect(
+    () => () => {
+      for (const p of Object.values(photosRef.current)) URL.revokeObjectURL(p.url);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!dirty) return;
@@ -69,6 +103,48 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
   function setAnswer(itemId: string, patch: Partial<Answers[string]>) {
     setAnswers((a) => ({ ...a, [itemId]: { ...(a[itemId] ?? { result: null, note: "" }), ...patch } }));
     setDirty(true);
+  }
+
+  async function onPickPhoto(item: FormItem, file: File) {
+    setPhotoBusy(item.id);
+    setPhotoErrors((e) => ({ ...e, [item.id]: "" }));
+    try {
+      const c = await compressImage(file);
+      await putPhoto({ inspectionId, itemId: item.id, blob: c.blob, width: c.width, height: c.height });
+      const old = photosRef.current[item.id];
+      if (old) URL.revokeObjectURL(old.url);
+      const view: PhotoView = { url: URL.createObjectURL(c.blob), size: c.blob.size };
+      setPhotos((p) => ({ ...p, [item.id]: view }));
+      void requestPersistentStorage();
+    } catch (e) {
+      setPhotoErrors((errs) => ({
+        ...errs,
+        [item.id]: e instanceof Error ? e.message : "Foto gagal disimpan.",
+      }));
+    } finally {
+      setPhotoBusy(null);
+    }
+  }
+
+  async function onRemovePhoto(item: FormItem) {
+    setPhotoBusy(item.id);
+    try {
+      await deletePhoto(inspectionId, item.id);
+      const old = photosRef.current[item.id];
+      if (old) URL.revokeObjectURL(old.url);
+      setPhotos((p) => {
+        const next = { ...p };
+        delete next[item.id];
+        return next;
+      });
+    } catch (e) {
+      setPhotoErrors((errs) => ({
+        ...errs,
+        [item.id]: e instanceof Error ? e.message : "Foto gagal dihapus.",
+      }));
+    } finally {
+      setPhotoBusy(null);
+    }
   }
 
   /** Mengembalikan true bila draft berhasil tersimpan. */
@@ -122,7 +198,17 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
       document.getElementById(`item-${noNote[0].code}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    if (!window.confirm("Setelah difinalkan, inspeksi terkunci dan tidak bisa diubah lagi. Lanjutkan?")) return;
+    const noPhoto = allItems.filter((i) => i.requiresPhoto && !photos[i.id]);
+    if (noPhoto.length) {
+      setShowMissing(true);
+      setError(`Item wajib foto belum ada fotonya: ${noPhoto.map((i) => i.code).join(", ")}.`);
+      document.getElementById(`item-${noPhoto[0].code}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    const confirmText = photoCount
+      ? "Setelah difinalkan, inspeksi terkunci dan tidak bisa diubah lagi. Foto hanya ada di browser HP ini, jadi unduh PDF/Excel dari halaman detail. Lanjutkan?"
+      : "Setelah difinalkan, inspeksi terkunci dan tidak bisa diubah lagi. Lanjutkan?";
+    if (!window.confirm(confirmText)) return;
 
     setBusy("final");
     if (await save()) {
@@ -144,7 +230,7 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
   }
 
   return (
-    <div className="pb-28">
+    <div className="pb-40 sm:pb-28">
       <div className="sticky top-0 z-10 -mx-4 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <p className="shrink-0 text-sm font-semibold">{number}</p>
@@ -167,6 +253,13 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
       <div className="mx-auto mt-6 max-w-3xl space-y-6">
         {error && <Alert kind="error">{error}</Alert>}
         {notice && <Alert kind="success">{notice}</Alert>}
+        {photoCount > 0 && (
+          <div role="note" className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+            Foto disimpan di browser HP ini saja, tidak di server. Setelah finalisasi, unduh PDF/Excel dari halaman detail
+            sebagai arsip foto.
+          </div>
+        )}
+        {storageError && photoCount > 0 && <Alert kind="error">{storageError}</Alert>}
         {duplicates.length > 0 && (
           <div role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-amber-900">
             <p className="text-sm font-semibold">Nomor seri ini juga tercatat di inspeksi lain:</p>
@@ -265,11 +358,12 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
                   const a = answers[item.id];
                   const needsResult = showMissing && !a?.result;
                   const needsNote = showMissing && a?.result === "TIDAK" && !a.note.trim();
+                  const needsPhoto = showMissing && item.requiresPhoto && !photos[item.id];
                   return (
                     <li
                       key={item.id}
                       id={`item-${item.code}`}
-                      className={`rounded-xl bg-white p-4 ring-1 ${needsResult || needsNote ? "ring-2 ring-red-600" : "ring-slate-200"}`}
+                      className={`rounded-xl bg-white p-4 ring-1 ${needsResult || needsNote || needsPhoto ? "ring-2 ring-red-600" : "ring-slate-200"}`}
                     >
                       <fieldset>
                         <legend className="w-full">
@@ -311,6 +405,17 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
                             error={needsNote ? "Wajib diisi untuk item bernilai Tidak" : undefined}
                           />
                         </div>
+                        {item.requiresPhoto && (
+                          <PhotoField
+                            itemCode={item.code}
+                            photo={photos[item.id]}
+                            busy={photoBusy === item.id}
+                            error={photoErrors[item.id] || undefined}
+                            missing={needsPhoto}
+                            onPick={(file) => void onPickPhoto(item, file)}
+                            onRemove={() => void onRemovePhoto(item)}
+                          />
+                        )}
                         {needsResult && <p className="mt-2 text-sm text-red-700">Pilih Ya, Tidak, atau N/A.</p>}
                       </fieldset>
                     </li>
@@ -322,7 +427,7 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
         })}
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
+      <div className="fixed inset-x-0 bottom-14 z-10 border-y border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:bottom-0 sm:border-b-0">
         <div className="mx-auto flex max-w-3xl gap-3">
           <Button variant="secondary" className="flex-1" onClick={onSave} loading={busy === "save"} disabled={busy !== null}>
             Simpan draft
