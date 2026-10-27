@@ -51,6 +51,7 @@ model User {
   inspections   Inspection[]         @relation("Inspector")
   notifications Notification[]
   auditLogs     AuditLog[]
+  incomingUnits IncomingUnit[] @relation("UnitCreator")
 }
 
 model Session {
@@ -135,6 +136,20 @@ model InspectionResult {
   item       ChecklistItem  @relation(fields: [itemId], references: [id])
 
   @@unique([inspectionId, itemId])
+}
+
+// Data awal (opsional): unit yang masuk ke ruang pemeriksaan, dibandingkan dengan riwayat inspeksi.
+model IncomingUnit {
+  id           String   @id @default(cuid())
+  serialNumber String   @unique // disimpan huruf besar, spasi dirapikan
+  model        String   @default("75WM61FE")
+  receivedAt   DateTime
+  note         String?
+  createdById  String
+  createdAt    DateTime @default(now())
+  createdBy    User     @relation("UnitCreator", fields: [createdById], references: [id])
+
+  @@index([receivedAt])
 }
 
 model Notification {

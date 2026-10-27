@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { deleteAllPhotos, listPhotos } from "@/lib/photos/photo-store";
+import { listPhotos } from "@/lib/photos/photo-store";
 import { blobToDataUrl, downloadBlob, fileBase, type ReportData, type ReportPhotos } from "@/lib/export/report";
 
 type Props = { inspectionId: string; report: ReportData };
 
 export function ExportButtons({ inspectionId, report }: Props) {
   const [stored, setStored] = useState<number | null>(null);
-  const [busy, setBusy] = useState<"pdf" | "xlsx" | "clear" | null>(null);
+  const [busy, setBusy] = useState<"pdf" | "xlsx" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -38,33 +38,17 @@ export function ExportButtons({ inspectionId, report }: Props) {
     setError(null);
     setNotice(null);
     try {
-      const photos = await loadPhotos();
       if (kind === "pdf") {
+        const photos = await loadPhotos();
         const { buildPdf } = await import("@/lib/export/build-pdf");
         downloadBlob(await buildPdf(report, photos), `${fileBase(report)}.pdf`);
       } else {
         const { buildExcel } = await import("@/lib/export/build-excel");
-        downloadBlob(await buildExcel(report, photos), `${fileBase(report)}.xlsx`);
+        downloadBlob(await buildExcel(report), `${fileBase(report)}.xlsx`);
       }
       setNotice("File diunduh. Periksa folder Download di HP Anda.");
     } catch (e) {
       setError(e instanceof Error ? `Gagal membuat file: ${e.message}` : "Gagal membuat file.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function clearPhotos() {
-    if (!window.confirm("Hapus semua foto inspeksi ini dari browser HP? Pastikan PDF/Excel sudah diunduh dan tersimpan. Foto tidak bisa dikembalikan.")) return;
-    setBusy("clear");
-    setError(null);
-    setNotice(null);
-    try {
-      await deleteAllPhotos(inspectionId);
-      setStored(0);
-      setNotice("Foto dihapus dari browser ini.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Gagal menghapus foto.");
     } finally {
       setBusy(null);
     }
@@ -81,8 +65,8 @@ export function ExportButtons({ inspectionId, report }: Props) {
           role={stored < photoItems ? "status" : undefined}
         >
           {stored === 0
-            ? "Foto tidak ditemukan di browser ini. Laporan akan dibuat tanpa foto. Buka halaman ini dari HP dan browser yang dipakai saat inspeksi."
-            : `Foto tersimpan di browser ini: ${stored} dari ${photoItems} item wajib foto.`}
+            ? "Foto tidak ditemukan di browser ini. PDF akan dibuat tanpa foto. Buka halaman ini dari HP dan browser yang dipakai saat inspeksi."
+            : `Foto tersimpan di browser ini: ${stored} dari ${photoItems} item wajib foto. Foto hanya masuk ke PDF; Excel berisi data tanpa foto.`}
         </p>
       )}
       <div className="mt-4 flex flex-wrap gap-2">
@@ -92,11 +76,6 @@ export function ExportButtons({ inspectionId, report }: Props) {
         <Button variant="secondary" onClick={() => run("xlsx")} loading={busy === "xlsx"} disabled={busy !== null}>
           Unduh Excel
         </Button>
-        {stored !== null && stored > 0 && (
-          <Button variant="secondary" className="text-red-800" onClick={clearPhotos} loading={busy === "clear"} disabled={busy !== null}>
-            Hapus foto dari browser
-          </Button>
-        )}
       </div>
       <div className="mt-3 space-y-2">
         {error && <Alert kind="error">{error}</Alert>}

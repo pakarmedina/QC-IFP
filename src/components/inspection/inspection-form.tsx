@@ -6,6 +6,7 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SerialField } from "@/components/ui/serial-field";
 import { Textarea } from "@/components/ui/textarea";
 import { compressImage } from "@/lib/photos/compress";
 import { deletePhoto, listPhotos, putPhoto, requestPersistentStorage } from "@/lib/photos/photo-store";
@@ -230,7 +231,7 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
   }
 
   return (
-    <div className="pb-40 sm:pb-28">
+    <div className="pb-52 sm:pb-28">
       <div className="sticky top-0 z-10 -mx-4 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <p className="shrink-0 text-sm font-semibold">{number}</p>
@@ -272,11 +273,11 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
             Data unit
           </h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <Input
+            <SerialField
               name="serialNumber"
               label="Nomor seri unit"
               value={header.serialNumber}
-              onChange={(e) => setHeaderField("serialNumber", e.target.value)}
+              onChange={(v) => setHeaderField("serialNumber", v)}
               error={fieldErrors.serialNumber?.[0]}
             />
             <Input
@@ -427,7 +428,7 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
         })}
       </div>
 
-      <div className="fixed inset-x-0 bottom-14 z-10 border-y border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:bottom-0 sm:border-b-0">
+      <div className="fixed inset-x-0 bottom-20 z-10 border-y border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:bottom-0 sm:border-b-0">
         <div className="mx-auto flex max-w-3xl gap-3">
           <Button variant="secondary" className="flex-1" onClick={onSave} loading={busy === "save"} disabled={busy !== null}>
             Simpan draft

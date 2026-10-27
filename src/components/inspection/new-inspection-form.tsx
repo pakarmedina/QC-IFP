@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SerialField } from "@/components/ui/serial-field";
 import { DuplicateList, type DuplicateInspection } from "./duplicate-list";
 
 export function NewInspectionForm({ defaultDate, defaultSite }: { defaultDate: string; defaultSite: string }) {
@@ -14,6 +15,7 @@ export function NewInspectionForm({ defaultDate, defaultSite }: { defaultDate: s
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [duplicates, setDuplicates] = useState<DuplicateInspection[]>([]);
+  const [serial, setSerial] = useState("");
 
   async function submit(confirmDuplicate: boolean) {
     if (!formRef.current) return;
@@ -72,7 +74,7 @@ export function NewInspectionForm({ defaultDate, defaultSite }: { defaultDate: s
           </div>
         </div>
       )}
-      <Input name="serialNumber" label="Nomor seri unit" required error={fieldErrors.serialNumber?.[0]} />
+      <SerialField name="serialNumber" label="Nomor seri unit" required value={serial} onChange={setSerial} error={fieldErrors.serialNumber?.[0]} />
       <Input name="site" label="Lokasi / Site" defaultValue={defaultSite} required error={fieldErrors.site?.[0]} />
       <Input
         name="inspectedAt"

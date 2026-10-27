@@ -5,15 +5,17 @@ import { formatDate } from "@/lib/format";
 import { requirePageUser } from "@/server/auth/guard";
 import { db } from "@/server/db";
 import { getDashboardStats } from "@/server/services/inspection-service";
+import { getUnitOverview } from "@/server/services/unit-service";
 
 export const metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const user = await requirePageUser();
-  const [stats, pendingUsers] = await Promise.all([
+  const [stats, pendingUsers, unitSummary] = await Promise.all([
     getDashboardStats(user),
     user.role === "ADMIN" ? db.user.count({ where: { status: "PENDING" } }) : Promise.resolve(0),
+    user.role === "ADMIN" ? getUnitOverview().then((o) => o.summary) : Promise.resolve(null),
   ]);
   const finalCount = stats.pass + stats.fail;
   const passRate = finalCount ? Math.round((stats.pass / finalCount) * 100) : null;
@@ -44,6 +46,15 @@ export default async function DashboardPage() {
             {pendingUsers} akun menunggu persetujuan.{" "}
             <Link href="/admin/users" className="font-semibold underline">
               Buka halaman Pengguna
+            </Link>
+          </p>
+        )}
+
+        {unitSummary && unitSummary.belum > 0 && (
+          <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {unitSummary.belum} dari {unitSummary.total} unit masuk belum diperiksa.{" "}
+            <Link href="/admin/units?status=BELUM" className="font-semibold underline">
+              Lihat daftar
             </Link>
           </p>
         )}

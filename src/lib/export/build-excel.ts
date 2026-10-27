@@ -1,10 +1,7 @@
-import { RESULT_LABEL, VERDICT_LABEL, missingPhotoCodes, summarize, type ReportData, type ReportPhotos } from "./report";
+import { RESULT_LABEL, VERDICT_LABEL, summarize, type ReportData } from "./report";
 
-const PHOTO_W = 150; // piksel
-const PHOTO_H = 112;
-const PHOTO_ROW_PT = 88; // tinggi baris (poin) agar muat foto
-
-export async function buildExcel(report: ReportData, photos: ReportPhotos): Promise<Blob> {
+/** Excel berisi data saja (tanpa foto); foto hanya dilampirkan di PDF. */
+export async function buildExcel(report: ReportData): Promise<Blob> {
   const ExcelJS = (await import("exceljs")).default;
   const wb = new ExcelJS.Workbook();
   wb.creator = "QC IFP";
@@ -18,21 +15,20 @@ export async function buildExcel(report: ReportData, photos: ReportPhotos): Prom
     { width: 46 },
     { width: 24 },
     { width: 10 },
-    { width: 36 },
-    { width: 24 },
+    { width: 40 },
   ];
 
   const thin = { style: "thin" as const, color: { argb: "FFCBD5E1" } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
 
   // Judul
-  ws.mergeCells("A1:E1");
+  ws.mergeCells("A1:D1");
   ws.getCell("A1").value = `LAPORAN INSPEKSI QC - IFP Hisense ${report.model}`;
   ws.getCell("A1").font = { bold: true, size: 14, color: { argb: "FF1E3A8A" } };
-  ws.mergeCells("F1:G1");
-  ws.getCell("F1").value = report.verdict ? `HASIL: ${VERDICT_LABEL[report.verdict]}` : "";
-  ws.getCell("F1").font = { bold: true, size: 14, color: { argb: report.verdict === "PASS" ? "FF15803D" : "FFB91C1C" } };
-  ws.getCell("F1").alignment = { horizontal: "right" };
+  ws.mergeCells("E1:F1");
+  ws.getCell("E1").value = report.verdict ? `HASIL: ${VERDICT_LABEL[report.verdict]}` : "";
+  ws.getCell("E1").font = { bold: true, size: 14, color: { argb: report.verdict === "PASS" ? "FF15803D" : "FFB91C1C" } };
+  ws.getCell("E1").alignment = { horizontal: "right" };
 
   const info: [string, string][] = [
     ["Nomor laporan", report.number],
@@ -47,7 +43,7 @@ export async function buildExcel(report: ReportData, photos: ReportPhotos): Prom
   for (const [k, v] of info) {
     const r = ws.addRow([]).number;
     ws.mergeCells(`A${r}:B${r}`);
-    ws.mergeCells(`C${r}:G${r}`);
+    ws.mergeCells(`C${r}:F${r}`);
     ws.getCell(`A${r}`).value = k;
     ws.getCell(`A${r}`).font = { bold: true };
     ws.getCell(`C${r}`).value = v;
@@ -56,21 +52,14 @@ export async function buildExcel(report: ReportData, photos: ReportPhotos): Prom
 
   const counts = summarize(report);
   const sumRow = ws.addRow([]).number;
-  ws.mergeCells(`A${sumRow}:G${sumRow}`);
+  ws.mergeCells(`A${sumRow}:F${sumRow}`);
   ws.getCell(`A${sumRow}`).value = `Ringkasan: Ya ${counts.YA} | Tidak ${counts.TIDAK} | N/A ${counts.NA}`;
   ws.getCell(`A${sumRow}`).font = { bold: true };
 
-  const missing = missingPhotoCodes(report, photos);
-  if (missing.length) {
-    const r = ws.addRow([]).number;
-    ws.mergeCells(`A${r}:G${r}`);
-    ws.getCell(`A${r}`).value = `Peringatan: foto item ${missing.join(", ")} tidak tersedia di perangkat ini.`;
-    ws.getCell(`A${r}`).font = { bold: true, color: { argb: "FFB91C1C" } };
-  }
   ws.addRow([]);
 
   // Tabel
-  const headerRow = ws.addRow(["No", "Kode", "Item pemeriksaan", "Standar", "Hasil", "Keterangan", "Foto"]);
+  const headerRow = ws.addRow(["No", "Kode", "Item pemeriksaan", "Standar", "Hasil", "Keterangan"]);
   headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
   headerRow.eachCell((c) => {
     c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A8A" } };
@@ -88,13 +77,13 @@ export async function buildExcel(report: ReportData, photos: ReportPhotos): Prom
   let no = 0;
   for (const cat of report.categories) {
     const cr = ws.addRow([cat.name]);
-    ws.mergeCells(`A${cr.number}:G${cr.number}`);
+    ws.mergeCells(`A${cr.number}:F${cr.number}`);
     cr.font = { bold: true };
     cr.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE2E8F0" } };
 
     for (const it of cat.items) {
       no++;
-      const row = ws.addRow([no, it.code, it.label, it.standard ?? "", RESULT_LABEL[it.result], it.note ?? "", ""]);
+      const row = ws.addRow([no, it.code, it.label, it.standard ?? "", RESULT_LABEL[it.result], it.note ?? ""]);
       row.eachCell({ includeEmpty: true }, (c) => {
         c.border = border;
         c.alignment = { wrapText: true, vertical: "top" };
@@ -103,34 +92,20 @@ export async function buildExcel(report: ReportData, photos: ReportPhotos): Prom
       rc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fills[it.result] } };
       rc.font = { bold: true, color: { argb: it.result === "TIDAK" ? "FFB91C1C" : "FF000000" } };
       rc.alignment = { horizontal: "center", vertical: "top" };
-
-      const p = photos[it.itemId];
-      if (p) {
-        row.height = PHOTO_ROW_PT;
-        const ratio = p.width / p.height;
-        let w = PHOTO_W;
-        let h = w / ratio;
-        if (h > PHOTO_H) {
-          h = PHOTO_H;
-          w = h * ratio;
-        }
-        const imageId = wb.addImage({ base64: p.dataUrl, extension: "jpeg" });
-        ws.addImage(imageId, { tl: { col: 6.05, row: row.number - 1 + 0.05 }, ext: { width: w, height: h } });
-      }
     }
   }
 
   ws.addRow([]);
   const s1 = ws.addRow([]).number;
   ws.mergeCells(`A${s1}:C${s1}`);
-  ws.mergeCells(`D${s1}:G${s1}`);
+  ws.mergeCells(`D${s1}:F${s1}`);
   ws.getCell(`A${s1}`).value = "Diperiksa oleh (Inspektur)";
   ws.getCell(`D${s1}`).value = "Disetujui oleh (Supervisor/QA)";
   const s2 = ws.addRow([]);
   s2.height = 42;
   const s3 = ws.addRow([]).number;
   ws.mergeCells(`A${s3}:C${s3}`);
-  ws.mergeCells(`D${s3}:G${s3}`);
+  ws.mergeCells(`D${s3}:F${s3}`);
   ws.getCell(`A${s3}`).value = report.inspector;
   ws.getCell(`D${s3}`).value = report.approvedBy ?? "";
   ws.getCell(`A${s3}`).font = { bold: true };
