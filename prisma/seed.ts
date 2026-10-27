@@ -4,7 +4,13 @@ import { CHECKLIST } from "./checklist-data";
 
 const prisma = new PrismaClient();
 
-async function main() {
+async function seedChecklist() {
+  // Checklist hanya diisi saat masih kosong. Setelah itu Admin mengelolanya lewat aplikasi,
+  // dan seed (yang jalan di setiap deploy) tidak boleh menimpa perubahan tersebut.
+  if ((await prisma.checklistItem.count()) > 0) {
+    console.log("Checklist sudah ada: seed checklist dilewati.");
+    return;
+  }
   for (const [ci, cat] of CHECKLIST.entries()) {
     const category = await prisma.checklistCategory.upsert({
       where: { code: cat.code },
@@ -20,6 +26,10 @@ async function main() {
       });
     }
   }
+}
+
+async function main() {
+  await seedChecklist();
   const { ADMIN_USERNAME, ADMIN_EMAIL, ADMIN_PASSWORD } = process.env;
   if (ADMIN_USERNAME && ADMIN_EMAIL && ADMIN_PASSWORD) {
     await prisma.user.upsert({

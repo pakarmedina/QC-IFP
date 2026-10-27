@@ -147,6 +147,7 @@ export async function saveDraft(id: string, user: CurrentUser, input: SaveInspec
           categoryName: item.category.name,
           itemLabel: item.label,
           standard: item.standard,
+          requiresPhoto: item.requiresPhoto,
           result: r.result,
           note: r.note,
           photoUrl: photos.get(r.itemId) ?? null,

@@ -86,6 +86,7 @@ model ChecklistItem {
   code       String            @unique // A1..D31
   label      String
   standard   String? // nilai acuan, mis. "16GB"
+  requiresPhoto Boolean         @default(false) // wajib melampirkan foto
   sortOrder  Int
   isActive   Boolean           @default(true)
   category   ChecklistCategory @relation(fields: [categoryId], references: [id])
@@ -125,6 +126,7 @@ model InspectionResult {
   categoryName String
   itemLabel    String
   standard     String?
+  requiresPhoto Boolean    @default(false)
   result       ItemResult
   note         String? // Keterangan
   photoUrl     String? // URL Foto per item

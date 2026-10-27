@@ -15,8 +15,16 @@ export default async function EditInspectionPage({ params }: { params: Promise<{
   if (!inspection) notFound();
   if (inspection.status === "FINAL") redirect(`/inspections/${id}`);
 
+  // Semua item default "Ya", kecuali item wajib foto yang harus diisi sendiri oleh inspektur.
+  const saved = new Map(inspection.results.map((r) => [r.itemId, r]));
   const answers: Answers = {};
-  for (const r of inspection.results) answers[r.itemId] = { result: r.result, note: r.note ?? "" };
+  for (const cat of checklist) {
+    for (const item of cat.items) {
+      const r = saved.get(item.id);
+      if (r) answers[item.id] = { result: r.result, note: r.note ?? "" };
+      else if (!item.requiresPhoto) answers[item.id] = { result: "YA", note: "" };
+    }
+  }
 
   return (
     <>
@@ -28,7 +36,7 @@ export default async function EditInspectionPage({ params }: { params: Promise<{
           categories={checklist.map((c) => ({
             code: c.code,
             name: c.name,
-            items: c.items.map((i) => ({ id: i.id, code: i.code, label: i.label, standard: i.standard })),
+            items: c.items.map((i) => ({ id: i.id, code: i.code, label: i.label, standard: i.standard, requiresPhoto: i.requiresPhoto })),
           }))}
           initialHeader={{
             serialNumber: inspection.serialNumber,

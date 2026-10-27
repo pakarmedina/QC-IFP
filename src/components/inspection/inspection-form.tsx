@@ -3,12 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 type ResultValue = "YA" | "TIDAK" | "NA";
-export type FormItem = { id: string; code: string; label: string; standard: string | null };
+export type FormItem = { id: string; code: string; label: string; standard: string | null; requiresPhoto: boolean };
 export type FormCategory = { code: string; name: string; items: FormItem[] };
 export type Answers = Record<string, { result: ResultValue | null; note: string }>;
 export type FormHeader = {
@@ -44,10 +45,12 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
   const [notice, setNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [showMissing, setShowMissing] = useState(false);
+  const [view, setView] = useState<"all" | "photo">("all");
 
   const allItems = useMemo(() => categories.flatMap((c) => c.items), [categories]);
   const answeredCount = allItems.filter((i) => answers[i.id]?.result).length;
   const percent = allItems.length ? Math.round((answeredCount / allItems.length) * 100) : 0;
+  const photoCount = allItems.filter((i) => i.requiresPhoto).length;
 
   useEffect(() => {
     if (!dirty) return;
@@ -213,8 +216,31 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
           </div>
         </section>
 
+        <div role="group" aria-label="Tampilan item" className="flex flex-wrap gap-2">
+          {(["all", "photo"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              aria-pressed={view === v}
+              onClick={() => setView(v)}
+              className={`min-h-11 rounded-lg px-4 text-sm font-semibold ring-1 ${
+                view === v ? "bg-brand-600 text-white ring-brand-600" : "bg-white text-slate-800 ring-slate-300"
+              }`}
+            >
+              {v === "all" ? `Semua item (${allItems.length})` : `Wajib foto (${photoCount})`}
+            </button>
+          ))}
+        </div>
+        {view === "photo" && photoCount === 0 && (
+          <p className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
+            Belum ada item yang ditandai wajib foto. Admin bisa menandainya di menu Checklist.
+          </p>
+        )}
+
         {categories.map((cat) => {
-          const done = cat.items.filter((i) => answers[i.id]?.result).length;
+          const shown = view === "photo" ? cat.items.filter((i) => i.requiresPhoto) : cat.items;
+          if (shown.length === 0) return null;
+          const done = shown.filter((i) => answers[i.id]?.result).length;
           return (
             <section key={cat.code} aria-labelledby={`cat-${cat.code}`}>
               <h2 id={`cat-${cat.code}`} className="flex items-baseline justify-between text-lg font-bold">
@@ -222,11 +248,11 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
                   {cat.code}. {cat.name}
                 </span>
                 <span className="text-sm font-normal text-slate-600">
-                  {done}/{cat.items.length} terisi
+                  {done}/{shown.length} terisi
                 </span>
               </h2>
               <ul className="mt-3 space-y-3">
-                {cat.items.map((item) => {
+                {shown.map((item) => {
                   const a = answers[item.id];
                   const needsResult = showMissing && !a?.result;
                   const needsNote = showMissing && a?.result === "TIDAK" && !a.note.trim();
@@ -240,6 +266,11 @@ export function InspectionForm({ inspectionId, number, categories, initialHeader
                         <legend className="w-full">
                           <span className="text-sm font-semibold text-slate-500">{item.code}</span>{" "}
                           <span className="font-medium">{item.label}</span>
+                          {item.requiresPhoto && (
+                            <span className="ml-2 align-middle">
+                              <Badge tone="amber">Wajib foto</Badge>
+                            </span>
+                          )}
                           {item.standard && <span className="mt-0.5 block text-sm text-slate-600">Standar: {item.standard}</span>}
                         </legend>
                         <div className="mt-3 grid grid-cols-3 gap-2">
