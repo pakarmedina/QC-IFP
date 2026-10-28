@@ -4,40 +4,20 @@ import { StatusBadge, VerdictBadge } from "@/components/ui/badge";
 import { RowActions } from "@/components/inspection/row-actions";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { requirePageUser } from "@/server/auth/guard";
-import { listInspections, type ListParams } from "@/server/services/inspection-service";
+import { listInspections } from "@/server/services/inspection-service";
+import { filterQueryString, parseListParams } from "@/lib/inspection-filters";
+import { ListReportButton } from "@/components/inspection/list-report-button";
 
 export const metadata = { title: "Inspeksi" };
 export const dynamic = "force-dynamic";
 
 type SP = Record<string, string | string[] | undefined>;
-const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
-const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
-const isMonth = (s: string) => /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
-
-function parseParams(sp: SP): ListParams {
-  const status = first(sp.status);
-  const verdict = first(sp.verdict);
-  const sort = first(sp.sort);
-  const from = first(sp.from);
-  const to = first(sp.to);
-  const month = first(sp.month);
-  return {
-    q: first(sp.q).trim().slice(0, 60) || undefined,
-    status: status === "DRAFT" || status === "FINAL" ? status : undefined,
-    verdict: verdict === "PASS" || verdict === "FAIL" ? verdict : undefined,
-    from: isDate(from) ? from : undefined,
-    to: isDate(to) ? to : undefined,
-    month: isMonth(month) ? month : undefined,
-    sort: sort === "oldest" || sort === "serial" ? sort : "newest",
-    page: Math.max(1, parseInt(first(sp.page), 10) || 1),
-  };
-}
 
 const selectClass = "block min-h-11 w-full min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 text-base";
 
 export default async function InspectionsPage({ searchParams }: { searchParams: Promise<SP> }) {
   const user = await requirePageUser();
-  const params = parseParams(await searchParams);
+  const params = parseListParams(await searchParams);
   const { items, total, page, pages } = await listInspections(user, params);
 
   const pageHref = (p: number) => {
@@ -60,12 +40,15 @@ export default async function InspectionsPage({ searchParams }: { searchParams: 
       <main className="mx-auto max-w-5xl px-4 py-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold">Inspeksi</h1>
-          <Link
-            href="/inspections/new"
-            className="inline-flex min-h-11 items-center rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white hover:bg-brand-700"
-          >
-            Inspeksi baru
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <ListReportButton query={filterQueryString(params)} disabled={total === 0} />
+            <Link
+              href="/inspections/new"
+              className="inline-flex min-h-11 items-center rounded-lg bg-brand-600 px-4 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              Inspeksi baru
+            </Link>
+          </div>
         </div>
 
         <form method="get" className="mt-6 grid grid-cols-2 gap-3 rounded-xl bg-white p-4 ring-1 ring-slate-200 lg:grid-cols-3 [&>div]:min-w-0">

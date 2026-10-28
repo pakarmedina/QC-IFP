@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,12 @@ export function ExportButtons({ inspectionId, report }: Props) {
         <Button variant="secondary" onClick={() => run("xlsx")} loading={busy === "xlsx"} disabled={busy !== null}>
           Unduh Excel
         </Button>
+        <Link
+          href="/inspections/new"
+          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-white px-4 text-sm font-semibold text-brand-700 ring-1 ring-brand-600 hover:bg-brand-50"
+        >
+          Inspeksi baru
+        </Link>
       </div>
       <div className="mt-3 space-y-2">
         {error && <Alert kind="error">{error}</Alert>}

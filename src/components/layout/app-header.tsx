@@ -6,6 +6,7 @@ export function AppHeader({ user }: { user: CurrentUser }) {
   const links = [
     { href: "/dashboard", label: "Dashboard" },
     { href: "/inspections", label: "Inspeksi" },
+    { href: "/profile", label: "Akun Saya" },
     ...(user.role === "ADMIN" ? [{ href: "/admin/users", label: "Pengguna" }, { href: "/admin/checklist", label: "Checklist" }, { href: "/admin/units", label: "Unit masuk" }] : []),
   ];
   return (

@@ -4,7 +4,8 @@ import { StatusBadge, VerdictBadge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/format";
 import { requirePageUser } from "@/server/auth/guard";
 import { db } from "@/server/db";
-import { getDashboardStats } from "@/server/services/inspection-service";
+import { DashboardCharts } from "@/components/dashboard/dashboard-charts";
+import { getDashboardStats, getMonthlyStats } from "@/server/services/inspection-service";
 import { getUnitOverview } from "@/server/services/unit-service";
 
 export const metadata = { title: "Dashboard" };
@@ -12,8 +13,9 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const user = await requirePageUser();
-  const [stats, pendingUsers, unitSummary] = await Promise.all([
+  const [stats, monthly, pendingUsers, unitSummary] = await Promise.all([
     getDashboardStats(user),
+    getMonthlyStats(user),
     user.role === "ADMIN" ? db.user.count({ where: { status: "PENDING" } }) : Promise.resolve(0),
     user.role === "ADMIN" ? getUnitOverview().then((o) => o.summary) : Promise.resolve(null),
   ]);
@@ -72,6 +74,8 @@ export default async function DashboardPage() {
             ? "Persentase lulus muncul setelah ada inspeksi yang difinalkan."
             : `Persentase lulus: ${passRate}% dari ${finalCount} inspeksi final.`}
         </p>
+
+        <DashboardCharts monthly={monthly} totals={{ pass: stats.pass, fail: stats.fail, drafts: stats.drafts }} />
 
         <div className="mt-8 grid gap-6 md:grid-cols-2">
           <section aria-labelledby="recent">

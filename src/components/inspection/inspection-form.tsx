@@ -165,36 +165,6 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
     return { ya, tidak, na };
   }, [allItems, answers]);
 
-  // Item yang sedang tampil (mengikuti filter "Semua item" / "Wajib foto").
-  const shownItems = useMemo(
-    () => (view === "photo" ? allItems.filter((i) => i.requiresPhoto) : allItems),
-    [allItems, view],
-  );
-
-  function setAllYa() {
-    const changing = shownItems.filter((i) => answers[i.id]?.result && answers[i.id]?.result !== "YA").length;
-    if (changing > 0 && !window.confirm(`${changing} item yang sudah berisi Tidak atau N/A akan diganti menjadi Ya. Lanjutkan?`)) return;
-    setAnswers((a) => {
-      const next = { ...a };
-      for (const i of shownItems) next[i.id] = { result: "YA", note: next[i.id]?.note ?? "" };
-      return next;
-    });
-    setDirty(true);
-    setNotice(null);
-  }
-
-  function clearAll() {
-    const filled = shownItems.filter((i) => answers[i.id]?.result || answers[i.id]?.note).length;
-    if (filled > 0 && !window.confirm(`Kosongkan jawaban dan keterangan ${filled} item yang tampil? Belum tersimpan sampai Anda menekan Simpan.`)) return;
-    setAnswers((a) => {
-      const next = { ...a };
-      for (const i of shownItems) delete next[i.id];
-      return next;
-    });
-    setDirty(true);
-    setNotice(null);
-  }
-
   /** Mengembalikan true bila draft berhasil tersimpan. */
   async function save(): Promise<boolean> {
     setError(null);
@@ -426,24 +396,6 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
             </button>
           ))}
         </div>
-        <div role="group" aria-label="Isi cepat" className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={setAllYa}
-            disabled={shownItems.length === 0}
-            className="min-h-11 rounded-lg bg-white px-4 text-sm font-semibold text-slate-800 ring-1 ring-slate-300 disabled:opacity-60"
-          >
-            Semua Ya ({shownItems.length})
-          </button>
-          <button
-            type="button"
-            onClick={clearAll}
-            disabled={shownItems.length === 0}
-            className="min-h-11 rounded-lg bg-white px-4 text-sm font-semibold text-red-800 ring-1 ring-slate-300 disabled:opacity-60"
-          >
-            Kosongkan
-          </button>
-        </div>
         {view === "photo" && photoCount === 0 && (
           <p className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
             Belum ada item yang ditandai wajib foto. Admin bisa menandainya di menu Checklist.
@@ -485,7 +437,7 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
         })}
       </div>
 
-      <div className="fixed inset-x-0 bottom-20 z-10 border-y border-slate-200 bg-white px-4 py-3 sm:bottom-0 sm:border-b-0">
+      <div className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white px-4 pb-[5.75rem] pt-3 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] sm:pb-3">
         <p className="mx-auto mb-2 max-w-3xl text-sm text-slate-700" aria-live="polite">
           Terisi {answeredCount}/{allItems.length} · <span className="font-semibold text-green-800">Ya {counts.ya}</span> ·{" "}
           <span className="font-semibold text-red-800">Tidak {counts.tidak}</span> · <span className="font-semibold">N/A {counts.na}</span>

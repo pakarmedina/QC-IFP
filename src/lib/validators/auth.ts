@@ -44,5 +44,22 @@ export const resetPasswordSchema = z
     message: "Konfirmasi kata sandi tidak sama",
   });
 
+export const profileSchema = z.object({
+  name: z.string().trim().min(2, "Nama minimal 2 karakter").max(80),
+  email: z.string().trim().toLowerCase().email("Format email tidak valid").max(120),
+});
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Kata sandi saat ini wajib diisi").max(100),
+    password,
+    confirmPassword: z.string(),
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Konfirmasi kata sandi tidak sama",
+  });
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ProfileInput = z.infer<typeof profileSchema>;

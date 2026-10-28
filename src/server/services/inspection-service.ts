@@ -312,7 +312,7 @@ export type ListParams = {
   page: number;
 };
 
-export async function listInspections(user: CurrentUser, p: ListParams) {
+function buildListQuery(user: CurrentUser, p: ListParams) {
   const and: Prisma.InspectionWhereInput[] = [ownScope(user)];
   if (p.q) {
     and.push({
@@ -341,6 +341,11 @@ export async function listInspections(user: CurrentUser, p: ListParams) {
         ? [{ serialNumber: "asc" }]
         : [{ inspectedAt: "desc" }, { createdAt: "desc" }];
 
+  return { where, orderBy };
+}
+
+export async function listInspections(user: CurrentUser, p: ListParams) {
+  const { where, orderBy } = buildListQuery(user, p);
   const total = await db.inspection.count({ where });
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(Math.max(1, p.page), pages);
@@ -352,6 +357,47 @@ export async function listInspections(user: CurrentUser, p: ListParams) {
     include: { inspector: { select: { name: true } } },
   });
   return { items, total, page, pages };
+}
+
+const REPORT_MAX_ROWS = 5000;
+
+/** Semua inspeksi yang cocok dengan filter (tanpa halaman) untuk laporan Excel. */
+export async function listForReport(user: CurrentUser, p: ListParams) {
+  const { where, orderBy } = buildListQuery(user, p);
+  return db.inspection.findMany({
+    where,
+    orderBy,
+    take: REPORT_MAX_ROWS,
+    include: { inspector: { select: { name: true } } },
+  });
+}
+
+/** Jumlah inspeksi final LULUS/GAGAL per bulan (WIB) untuk beberapa bulan terakhir. */
+export async function getMonthlyStats(user: CurrentUser, months = 6) {
+  const tz = "Asia/Jakarta";
+  const monthKey = (d: Date) => d.toLocaleDateString("sv-SE", { timeZone: tz }).slice(0, 7);
+  const [y0, m0] = monthKey(new Date()).split("-").map(Number);
+  const keys: string[] = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const idx = y0 * 12 + (m0 - 1) - i;
+    keys.push(`${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}`);
+  }
+  const rows = await db.inspection.findMany({
+    where: { ...ownScope(user), status: "FINAL", inspectedAt: { gte: toDbDate(`${keys[0]}-01`) } },
+    select: { inspectedAt: true, verdict: true },
+  });
+  const byKey = new Map(keys.map((k) => [k, { pass: 0, fail: 0 }]));
+  for (const r of rows) {
+    const b = byKey.get(monthKey(r.inspectedAt));
+    if (!b) continue;
+    if (r.verdict === "PASS") b.pass++;
+    else if (r.verdict === "FAIL") b.fail++;
+  }
+  return keys.map((key) => ({
+    key,
+    label: new Date(`${key}-15T00:00:00+07:00`).toLocaleDateString("id-ID", { month: "short", timeZone: tz }),
+    ...byKey.get(key)!,
+  }));
 }
 
 export async function getDashboardStats(user: CurrentUser) {
