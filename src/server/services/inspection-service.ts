@@ -178,6 +178,7 @@ export async function saveInspection(id: string, user: CurrentUser, input: SaveI
       where: { id },
       data: {
         serialNumber: input.serialNumber,
+        ...(input.model ? { model: input.model } : {}),
         site: input.site,
         inspectedAt: toDbDate(input.inspectedAt),
         physicalNote: input.physicalNote,

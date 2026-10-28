@@ -11,10 +11,12 @@ type Props = {
   onChange: (value: string) => void;
   error?: string;
   required?: boolean;
+  /** Judul jendela pemindai; bawaan untuk nomor seri. */
+  scanTitle?: string;
 };
 
-/** Kolom nomor seri dengan tombol pindai barcode. */
-export function SerialField({ name, label, value, onChange, error, required }: Props) {
+/** Kolom teks (nomor seri, model) dengan tombol pindai barcode. */
+export function SerialField({ name, label, value, onChange, error, required, scanTitle = "Pindai nomor seri" }: Props) {
   const [scanning, setScanning] = useState(false);
   return (
     <div>
@@ -37,7 +39,7 @@ export function SerialField({ name, label, value, onChange, error, required }: P
       </button>
       {scanning && (
         <BarcodeScanner
-          title="Pindai nomor seri"
+          title={scanTitle}
           onDetect={(v) => onChange(v.toUpperCase())}
           onClose={() => setScanning(false)}
         />

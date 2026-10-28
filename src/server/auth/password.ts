@@ -1,14 +1,16 @@
 import bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "crypto";
 
-const ROUNDS = 12;
-// Hash tiruan agar waktu respons login sama baik user ada maupun tidak.
-const DUMMY_HASH = bcrypt.hashSync("dummy-password-for-timing", ROUNDS);
+const ROUNDS = 10;
+// Hash tiruan agar waktu respons login mirip baik user ada maupun tidak.
+// Dihitung saat pertama dibutuhkan (bukan saat modul dimuat) supaya cold start fungsi tidak tertahan.
+let dummyHash: string | null = null;
+const getDummyHash = () => (dummyHash ??= bcrypt.hashSync("dummy-password-for-timing", ROUNDS));
 
 export const hashPassword = (plain: string) => bcrypt.hash(plain, ROUNDS);
 
 export async function verifyPassword(plain: string, hash: string | null) {
-  const ok = await bcrypt.compare(plain, hash ?? DUMMY_HASH);
+  const ok = await bcrypt.compare(plain, hash ?? getDummyHash());
   return ok && hash !== null;
 }
 

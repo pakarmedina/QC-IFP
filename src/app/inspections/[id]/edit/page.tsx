@@ -40,6 +40,7 @@ export default async function EditInspectionPage({ params }: { params: Promise<{
           }))}
           initialHeader={{
             serialNumber: inspection.serialNumber,
+            model: inspection.model,
             site: inspection.site,
             inspectedAt: toDateInput(inspection.inspectedAt),
             physicalNote: inspection.physicalNote ?? "",

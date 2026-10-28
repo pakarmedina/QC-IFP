@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ export type FormCategory = { code: string; name: string; items: FormItem[] };
 export type Answers = Record<string, { result: ResultValue | null; note: string }>;
 export type FormHeader = {
   serialNumber: string;
+  model: string;
   site: string;
   inspectedAt: string;
   physicalNote: string;
@@ -103,12 +104,13 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
     setDirty(true);
   }
 
-  function setAnswer(itemId: string, patch: Partial<Answers[string]>) {
+  // Stabil (tidak berubah antar render) supaya kartu item yang tidak berubah tidak ikut dirender ulang.
+  const setAnswer = useCallback((itemId: string, patch: Partial<Answers[string]>) => {
     setAnswers((a) => ({ ...a, [itemId]: { ...(a[itemId] ?? { result: null, note: "" }), ...patch } }));
     setDirty(true);
-  }
+  }, []);
 
-  async function onPickPhoto(item: FormItem, file: File) {
+  const onPickPhoto = useCallback(async (item: FormItem, file: File) => {
     setPhotoBusy(item.id);
     setPhotoErrors((e) => ({ ...e, [item.id]: "" }));
     try {
@@ -127,9 +129,9 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
     } finally {
       setPhotoBusy(null);
     }
-  }
+  }, [inspectionId]);
 
-  async function onRemovePhoto(item: FormItem) {
+  const onRemovePhoto = useCallback(async (item: FormItem) => {
     setPhotoBusy(item.id);
     try {
       await deletePhoto(inspectionId, item.id);
@@ -148,6 +150,49 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
     } finally {
       setPhotoBusy(null);
     }
+  }, [inspectionId]);
+
+  const counts = useMemo(() => {
+    let ya = 0;
+    let tidak = 0;
+    let na = 0;
+    for (const i of allItems) {
+      const r = answers[i.id]?.result;
+      if (r === "YA") ya++;
+      else if (r === "TIDAK") tidak++;
+      else if (r === "NA") na++;
+    }
+    return { ya, tidak, na };
+  }, [allItems, answers]);
+
+  // Item yang sedang tampil (mengikuti filter "Semua item" / "Wajib foto").
+  const shownItems = useMemo(
+    () => (view === "photo" ? allItems.filter((i) => i.requiresPhoto) : allItems),
+    [allItems, view],
+  );
+
+  function setAllYa() {
+    const changing = shownItems.filter((i) => answers[i.id]?.result && answers[i.id]?.result !== "YA").length;
+    if (changing > 0 && !window.confirm(`${changing} item yang sudah berisi Tidak atau N/A akan diganti menjadi Ya. Lanjutkan?`)) return;
+    setAnswers((a) => {
+      const next = { ...a };
+      for (const i of shownItems) next[i.id] = { result: "YA", note: next[i.id]?.note ?? "" };
+      return next;
+    });
+    setDirty(true);
+    setNotice(null);
+  }
+
+  function clearAll() {
+    const filled = shownItems.filter((i) => answers[i.id]?.result || answers[i.id]?.note).length;
+    if (filled > 0 && !window.confirm(`Kosongkan jawaban dan keterangan ${filled} item yang tampil? Belum tersimpan sampai Anda menekan Simpan.`)) return;
+    setAnswers((a) => {
+      const next = { ...a };
+      for (const i of shownItems) delete next[i.id];
+      return next;
+    });
+    setDirty(true);
+    setNotice(null);
   }
 
   /** Mengembalikan true bila draft berhasil tersimpan. */
@@ -265,8 +310,8 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
   }
 
   return (
-    <div className="pb-52 sm:pb-28">
-      <div className="sticky top-0 z-10 -mx-4 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
+    <div className="pb-60 sm:pb-36">
+      <div className="sticky top-0 z-10 -mx-4 border-b border-slate-200 bg-white px-4 py-3">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <p className="shrink-0 text-sm font-semibold">{number}</p>
           <div
@@ -318,6 +363,14 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
               value={header.serialNumber}
               onChange={(v) => setHeaderField("serialNumber", v)}
               error={fieldErrors.serialNumber?.[0]}
+            />
+            <SerialField
+              name="model"
+              label="Model"
+              scanTitle="Pindai model"
+              value={header.model}
+              onChange={(v) => setHeaderField("model", v)}
+              error={fieldErrors.model?.[0]}
             />
             <Input
               name="site"
@@ -373,6 +426,24 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
             </button>
           ))}
         </div>
+        <div role="group" aria-label="Isi cepat" className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={setAllYa}
+            disabled={shownItems.length === 0}
+            className="min-h-11 rounded-lg bg-white px-4 text-sm font-semibold text-slate-800 ring-1 ring-slate-300 disabled:opacity-60"
+          >
+            Semua Ya ({shownItems.length})
+          </button>
+          <button
+            type="button"
+            onClick={clearAll}
+            disabled={shownItems.length === 0}
+            className="min-h-11 rounded-lg bg-white px-4 text-sm font-semibold text-red-800 ring-1 ring-slate-300 disabled:opacity-60"
+          >
+            Kosongkan
+          </button>
+        </div>
         {view === "photo" && photoCount === 0 && (
           <p className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-600">
             Belum ada item yang ditandai wajib foto. Admin bisa menandainya di menu Checklist.
@@ -394,80 +465,31 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
                 </span>
               </h2>
               <ul className="mt-3 space-y-3">
-                {shown.map((item) => {
-                  const a = answers[item.id];
-                  const needsResult = showMissing && !a?.result;
-                  const needsNote = showMissing && a?.result === "TIDAK" && !a.note.trim();
-                  const needsPhoto = showMissing && item.requiresPhoto && !photos[item.id];
-                  return (
-                    <li
-                      key={item.id}
-                      id={`item-${item.code}`}
-                      className={`rounded-xl bg-white p-4 ring-1 ${needsResult || needsNote || needsPhoto ? "ring-2 ring-red-600" : "ring-slate-200"}`}
-                    >
-                      <fieldset>
-                        <legend className="w-full">
-                          <span className="text-sm font-semibold text-slate-500">{item.code}</span>{" "}
-                          <span className="font-medium">{item.label}</span>
-                          {item.requiresPhoto && (
-                            <span className="ml-2 align-middle">
-                              <Badge tone="amber">Wajib foto</Badge>
-                            </span>
-                          )}
-                          {item.standard && <span className="mt-0.5 block text-sm text-slate-600">Standar: {item.standard}</span>}
-                        </legend>
-                        <div className="mt-3 grid grid-cols-3 gap-2">
-                          {OPTIONS.map((o) => (
-                            <label key={o.value} className="block cursor-pointer">
-                              <input
-                                type="radio"
-                                className="peer sr-only"
-                                name={`result-${item.id}`}
-                                value={o.value}
-                                checked={a?.result === o.value}
-                                onChange={() => setAnswer(item.id, { result: o.value })}
-                              />
-                              <span
-                                className={`flex min-h-11 items-center justify-center rounded-lg bg-white text-sm font-semibold text-slate-800 ring-1 ring-slate-300 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand-600 ${o.selected}`}
-                              >
-                                {o.label}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                        <div className="mt-3">
-                          <Input
-                            name={`note-${item.id}`}
-                            label="Keterangan"
-                            value={a?.note ?? ""}
-                            maxLength={500}
-                            onChange={(e) => setAnswer(item.id, { note: e.target.value })}
-                            error={needsNote ? "Wajib diisi untuk item bernilai Tidak" : undefined}
-                          />
-                        </div>
-                        {item.requiresPhoto && (
-                          <PhotoField
-                            itemCode={item.code}
-                            photo={photos[item.id]}
-                            busy={photoBusy === item.id}
-                            error={photoErrors[item.id] || undefined}
-                            missing={needsPhoto}
-                            onPick={(file) => void onPickPhoto(item, file)}
-                            onRemove={() => void onRemovePhoto(item)}
-                          />
-                        )}
-                        {needsResult && <p className="mt-2 text-sm text-red-700">Pilih Ya, Tidak, atau N/A.</p>}
-                      </fieldset>
-                    </li>
-                  );
-                })}
+                {shown.map((item) => (
+                  <ItemCard
+                    key={item.id}
+                    item={item}
+                    answer={answers[item.id]}
+                    photo={photos[item.id]}
+                    busy={photoBusy === item.id}
+                    photoError={photoErrors[item.id] || undefined}
+                    showMissing={showMissing}
+                    onSetAnswer={setAnswer}
+                    onPick={onPickPhoto}
+                    onRemove={onRemovePhoto}
+                  />
+                ))}
               </ul>
             </section>
           );
         })}
       </div>
 
-      <div className="fixed inset-x-0 bottom-20 z-10 border-y border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:bottom-0 sm:border-b-0">
+      <div className="fixed inset-x-0 bottom-20 z-10 border-y border-slate-200 bg-white px-4 py-3 sm:bottom-0 sm:border-b-0">
+        <p className="mx-auto mb-2 max-w-3xl text-sm text-slate-700" aria-live="polite">
+          Terisi {answeredCount}/{allItems.length} · <span className="font-semibold text-green-800">Ya {counts.ya}</span> ·{" "}
+          <span className="font-semibold text-red-800">Tidak {counts.tidak}</span> · <span className="font-semibold">N/A {counts.na}</span>
+        </p>
         <div className="mx-auto flex max-w-3xl gap-3">
           {isFinal ? (
             <>
@@ -493,3 +515,82 @@ export function InspectionForm({ inspectionId, number, status, categories, initi
     </div>
   );
 }
+
+type ItemCardProps = {
+  item: FormItem;
+  answer: Answers[string] | undefined;
+  photo: PhotoView | undefined;
+  busy: boolean;
+  photoError: string | undefined;
+  showMissing: boolean;
+  onSetAnswer: (itemId: string, patch: Partial<Answers[string]>) => void;
+  onPick: (item: FormItem, file: File) => Promise<void>;
+  onRemove: (item: FormItem) => Promise<void>;
+};
+
+/** Satu item checklist. Dibungkus memo: hanya kartu yang datanya berubah yang dirender ulang. */
+const ItemCard = memo(function ItemCard({ item, answer: a, photo, busy, photoError, showMissing, onSetAnswer, onPick, onRemove }: ItemCardProps) {
+  const needsResult = showMissing && !a?.result;
+  const needsNote = showMissing && a?.result === "TIDAK" && !a.note.trim();
+  const needsPhoto = showMissing && item.requiresPhoto && !photo;
+  return (
+    <li
+      id={`item-${item.code}`}
+      className={`rounded-xl bg-white p-4 ring-1 ${needsResult || needsNote || needsPhoto ? "ring-2 ring-red-600" : "ring-slate-200"}`}
+    >
+      <fieldset>
+        <legend className="w-full">
+          <span className="text-sm font-semibold text-slate-500">{item.code}</span>{" "}
+          <span className="font-medium">{item.label}</span>
+          {item.requiresPhoto && (
+            <span className="ml-2 align-middle">
+              <Badge tone="amber">Wajib foto</Badge>
+            </span>
+          )}
+          {item.standard && <span className="mt-0.5 block text-sm text-slate-600">Standar: {item.standard}</span>}
+        </legend>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {OPTIONS.map((o) => (
+            <label key={o.value} className="block cursor-pointer">
+              <input
+                type="radio"
+                className="peer sr-only"
+                name={`result-${item.id}`}
+                value={o.value}
+                checked={a?.result === o.value}
+                onChange={() => onSetAnswer(item.id, { result: o.value })}
+              />
+              <span
+                className={`flex min-h-11 items-center justify-center rounded-lg bg-white text-sm font-semibold text-slate-800 ring-1 ring-slate-300 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand-600 ${o.selected}`}
+              >
+                {o.label}
+              </span>
+            </label>
+          ))}
+        </div>
+        <div className="mt-3">
+          <Input
+            name={`note-${item.id}`}
+            label="Keterangan"
+            value={a?.note ?? ""}
+            maxLength={500}
+            onChange={(e) => onSetAnswer(item.id, { note: e.target.value })}
+            error={needsNote ? "Wajib diisi untuk item bernilai Tidak" : undefined}
+          />
+        </div>
+        {item.requiresPhoto && (
+          <PhotoField
+            itemCode={item.code}
+            photo={photo}
+            busy={busy}
+            error={photoError}
+            missing={needsPhoto}
+            onPick={(file) => void onPick(item, file)}
+            onRemove={() => void onRemove(item)}
+          />
+        )}
+        {needsResult && <p className="mt-2 text-sm text-red-700">Pilih Ya, Tidak, atau N/A.</p>}
+      </fieldset>
+    </li>
+  );
+});

@@ -31,6 +31,13 @@ export const createInspectionSchema = baseInspectionSchema.extend({
 
 export const saveInspectionSchema = baseInspectionSchema
   .extend({
+    // Model unit (boleh dipindai); kosong berarti model tidak diubah.
+    model: z
+      .string()
+      .trim()
+      .max(40, "Model terlalu panjang")
+      .optional()
+      .transform((v) => (v ? v.replace(/\s+/g, " ").toUpperCase() : undefined)),
     physicalNote: optionalText(500),
     boxNote: optionalText(500),
     approvedBy: optionalText(80),
